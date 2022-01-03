@@ -376,7 +376,7 @@ static int flv_set_video_codec(AVFormatContext *s, AVStream *vstream,
         break;
    case FLV_CODECID_HEVC:
         par->codec_id = AV_CODEC_ID_HEVC;
-        vstream->need_parsing = AVSTREAM_PARSE_NONE;
+        vstreami->need_parsing = AVSTREAM_PARSE_NONE;
         ret = 3;     // not 4, reading packet type will consume one byte
         break;
     default:
