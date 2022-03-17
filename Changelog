@@ -1,7 +1,14 @@
 Entries are sorted chronologically from oldest to youngest within each release,
 releases are sorted from youngest to oldest.
 
-version <next>:
+version 5.1:
+- dialogue enhance audio filter
+- dropped obsolete XvMC hwaccel
+- pcm-bluray encoder
+- DFPWM audio encoder/decoder and raw muxer/demuxer
+
+
+version 5.0:
 - ADPCM IMA Westwood encoder
 - Westwood AUD muxer
 - ADPCM IMA Acorn Replay decoder
@@ -44,6 +51,7 @@ version <next>:
 - yadif_videotoolbox filter
 - VideoToolbox ProRes encoder
 - anlmf audio filter
+- IMF demuxer (experimental)
 
 
 version 4.4:

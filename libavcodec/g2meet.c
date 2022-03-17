@@ -164,20 +164,20 @@ static av_cold int jpg_init(AVCodecContext *avctx, JPGContext *c)
 {
     int ret;
 
-    ret = ff_mjpeg_build_vlc(&c->dc_vlc[0], avpriv_mjpeg_bits_dc_luminance,
-                             avpriv_mjpeg_val_dc, 0, avctx);
+    ret = ff_mjpeg_build_vlc(&c->dc_vlc[0], ff_mjpeg_bits_dc_luminance,
+                             ff_mjpeg_val_dc, 0, avctx);
     if (ret)
         return ret;
-    ret = ff_mjpeg_build_vlc(&c->dc_vlc[1], avpriv_mjpeg_bits_dc_chrominance,
-                             avpriv_mjpeg_val_dc, 0, avctx);
+    ret = ff_mjpeg_build_vlc(&c->dc_vlc[1], ff_mjpeg_bits_dc_chrominance,
+                             ff_mjpeg_val_dc, 0, avctx);
     if (ret)
         return ret;
-    ret = ff_mjpeg_build_vlc(&c->ac_vlc[0], avpriv_mjpeg_bits_ac_luminance,
-                             avpriv_mjpeg_val_ac_luminance, 1, avctx);
+    ret = ff_mjpeg_build_vlc(&c->ac_vlc[0], ff_mjpeg_bits_ac_luminance,
+                             ff_mjpeg_val_ac_luminance, 1, avctx);
     if (ret)
         return ret;
-    ret = ff_mjpeg_build_vlc(&c->ac_vlc[1], avpriv_mjpeg_bits_ac_chrominance,
-                             avpriv_mjpeg_val_ac_chrominance, 1, avctx);
+    ret = ff_mjpeg_build_vlc(&c->ac_vlc[1], ff_mjpeg_bits_ac_chrominance,
+                             ff_mjpeg_val_ac_chrominance, 1, avctx);
     if (ret)
         return ret;
 
@@ -1592,7 +1592,6 @@ static av_cold int g2m_decode_init(AVCodecContext *avctx)
 
     if ((ret = jpg_init(avctx, &c->jc)) != 0) {
         av_log(avctx, AV_LOG_ERROR, "Cannot initialise VLCs\n");
-        jpg_free_context(&c->jc);
         return AVERROR(ENOMEM);
     }
 
@@ -1633,5 +1632,5 @@ const AVCodec ff_g2m_decoder = {
     .close          = g2m_decode_end,
     .decode         = g2m_decode_frame,
     .capabilities   = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
 };

@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include "libavutil/avassert.h"
 #include "libavutil/base64.h"
 #include "libavutil/bprint.h"
@@ -50,6 +52,7 @@
 #include "url.h"
 #include "rtpenc.h"
 #include "mpegts.h"
+#include "version.h"
 
 /* Default timeout values for read packet in seconds  */
 #define READ_PACKET_TIMEOUT_S 10
@@ -246,6 +249,7 @@ static void finalize_rtp_handler_init(AVFormatContext *s, RTSPStream *rtsp_st,
     }
 }
 
+#if CONFIG_RTSP_DEMUXER
 static int init_satip_stream(AVFormatContext *s)
 {
     RTSPState *rt = s->priv_data;
@@ -274,6 +278,7 @@ static int init_satip_stream(AVFormatContext *s)
     }
     return 0;
 }
+#endif
 
 /* parse the rtpmap description: <codec_name>/<clock_rate>[/<other params>] */
 static int sdp_parse_rtpmap(AVFormatContext *s,
@@ -321,19 +326,19 @@ static int sdp_parse_rtpmap(AVFormatContext *s,
     case AVMEDIA_TYPE_AUDIO:
         av_log(s, AV_LOG_DEBUG, "audio codec set to: %s\n", c_name);
         par->sample_rate = RTSP_DEFAULT_AUDIO_SAMPLERATE;
-        par->channels = RTSP_DEFAULT_NB_AUDIO_CHANNELS;
+        par->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
         if (i > 0) {
             par->sample_rate = i;
             avpriv_set_pts_info(st, 32, 1, par->sample_rate);
             get_word_sep(buf, sizeof(buf), "/", &p);
             i = atoi(buf);
             if (i > 0)
-                par->channels = i;
+                av_channel_layout_default(&par->ch_layout, i);
         }
         av_log(s, AV_LOG_DEBUG, "audio samplerate set to: %i\n",
                par->sample_rate);
         av_log(s, AV_LOG_DEBUG, "audio channels set to: %i\n",
-               par->channels);
+               par->ch_layout.nb_channels);
         break;
     case AVMEDIA_TYPE_VIDEO:
         av_log(s, AV_LOG_DEBUG, "video codec set to: %s\n", c_name);
@@ -2006,6 +2011,7 @@ redirect:
 #endif /* CONFIG_RTSP_DEMUXER || CONFIG_RTSP_MUXER */
 
 #if CONFIG_RTPDEC
+#if CONFIG_RTSP_DEMUXER
 static int parse_rtsp_message(AVFormatContext *s)
 {
     RTSPState *rt = s->priv_data;
@@ -2028,6 +2034,7 @@ static int parse_rtsp_message(AVFormatContext *s)
 
     return 0;
 }
+#endif
 
 static int udp_read_packet(AVFormatContext *s, RTSPStream **prtsp_st,
                            uint8_t *buf, int buf_size, int64_t wait_end)

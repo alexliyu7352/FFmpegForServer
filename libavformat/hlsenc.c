@@ -21,6 +21,7 @@
  */
 
 #include "config.h"
+#include "config_components.h"
 #include <float.h>
 #include <stdint.h>
 #if HAVE_UNISTD_H
@@ -900,6 +901,7 @@ static int hls_mux_init(AVFormatContext *s, VariantStream *vs)
         st->sample_aspect_ratio = vs->streams[i]->sample_aspect_ratio;
         st->time_base = vs->streams[i]->time_base;
         av_dict_copy(&st->metadata, vs->streams[i]->metadata, 0);
+        st->id = vs->streams[i]->id;
     }
 
     vs->start_pos = 0;

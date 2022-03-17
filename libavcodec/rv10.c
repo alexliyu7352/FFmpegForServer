@@ -34,13 +34,15 @@
 #include "error_resilience.h"
 #include "h263.h"
 #include "h263data.h"
+#include "h263dec.h"
 #include "internal.h"
 #include "mpeg_er.h"
 #include "mpegutils.h"
 #include "mpegvideo.h"
+#include "mpegvideodec.h"
 #include "mpeg4video.h"
 #include "mpegvideodata.h"
-#include "rv10.h"
+#include "rv10dec.h"
 
 #define RV_GET_MAJOR_VER(x)  ((x) >> 28)
 #define RV_GET_MINOR_VER(x) (((x) >> 20) & 0xFF)
@@ -149,7 +151,6 @@ static int rv10_decode_picture_header(MpegEncContext *s)
     }
     skip_bits(&s->gb, 3);   /* ignored */
     s->f_code          = 1;
-    s->unrestricted_mv = 1;
 
     return mb_count;
 }
@@ -298,7 +299,6 @@ static int rv20_decode_picture_header(RVDecContext *rv, int whole_size)
         skip_bits(&s->gb, 5);
 
     s->f_code          = 1;
-    s->unrestricted_mv = 1;
     s->h263_aic        = s->pict_type == AV_PICTURE_TYPE_I;
     s->modified_quant  = 1;
     if (!s->avctx->lowres)
@@ -691,6 +691,7 @@ const AVCodec ff_rv10_decoder = {
     .close          = rv10_decode_end,
     .decode         = rv10_decode_frame,
     .capabilities   = AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
     .max_lowres     = 3,
     .pix_fmts       = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV420P,
@@ -708,6 +709,7 @@ const AVCodec ff_rv20_decoder = {
     .close          = rv10_decode_end,
     .decode         = rv10_decode_frame,
     .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
     .flush          = ff_mpeg_flush,
     .max_lowres     = 3,
     .pix_fmts       = (const enum AVPixelFormat[]) {

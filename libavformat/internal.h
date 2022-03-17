@@ -25,6 +25,7 @@
 
 #include "libavcodec/avcodec.h"
 #include "libavcodec/bsf.h"
+#include "libavcodec/packet_internal.h"
 
 #include "avformat.h"
 #include "os_support.h"
@@ -82,6 +83,17 @@ typedef struct FFFormatContext {
     int nb_interleaved_streams;
 
     /**
+     * Whether the timestamp shift offset has already been determined.
+     * -1: disabled, 0: not yet determined, 1: determined.
+     */
+    enum {
+        AVOID_NEGATIVE_TS_DISABLED = -1,
+        AVOID_NEGATIVE_TS_UNKNOWN  = 0,
+        AVOID_NEGATIVE_TS_KNOWN    = 1,
+    } avoid_negative_ts_status;
+#define AVOID_NEGATIVE_TS_ENABLED(status) ((status) >= 0)
+
+    /**
      * The interleavement function in use. Always set for muxers.
      */
     int (*interleave_packet)(struct AVFormatContext *s, AVPacket *pkt,
@@ -92,8 +104,7 @@ typedef struct FFFormatContext {
      * not decoded, for example to get the codec parameters in MPEG
      * streams.
      */
-    struct PacketList *packet_buffer;
-    struct PacketList *packet_buffer_end;
+    PacketList packet_buffer;
 
     /* av_seek_frame() support */
     int64_t data_offset; /**< offset of the first packet */
@@ -104,13 +115,11 @@ typedef struct FFFormatContext {
      * be identified, as parsing cannot be done without knowing the
      * codec.
      */
-    struct PacketList *raw_packet_buffer;
-    struct PacketList *raw_packet_buffer_end;
+    PacketList raw_packet_buffer;
     /**
      * Packets split by the parser get queued here.
      */
-    struct PacketList *parse_queue;
-    struct PacketList *parse_queue_end;
+    PacketList parse_queue;
     /**
      * The generic code uses this as a temporary packet
      * to parse packets or for muxing, especially flushing.
@@ -136,18 +145,6 @@ typedef struct FFFormatContext {
      * Sum of the size of packets in raw_packet_buffer, in bytes.
      */
     int raw_packet_buffer_size;
-
-    /**
-     * Offset to remap timestamps to be non-negative.
-     * Expressed in timebase units.
-     * @see AVStream.mux_ts_offset
-     */
-    int64_t offset;
-
-    /**
-     * Timebase for the timestamp offset.
-     */
-    AVRational offset_timebase;
 
 #if FF_API_COMPUTE_PKT_FIELDS2
     int missing_ts_warning;
@@ -393,7 +390,7 @@ typedef struct FFStream {
     /**
      * last packet in packet_buffer for this stream when muxing.
      */
-    struct PacketList *last_in_packet_buffer;
+    PacketListEntry *last_in_packet_buffer;
 
     int64_t last_IP_pts;
     int last_IP_duration;
@@ -1018,5 +1015,12 @@ int ff_unlock_avformat(void);
 void ff_format_set_url(AVFormatContext *s, char *url);
 
 void avpriv_register_devices(const AVOutputFormat * const o[], const AVInputFormat * const i[]);
+
+/**
+ * Make shift_size amount of space at read_start by shifting data in the output
+ * at read_start until the current IO position. The underlying IO context must
+ * be seekable.
+ */
+int ff_format_shift_data(AVFormatContext *s, int64_t read_start, int shift_size);
 
 #endif /* AVFORMAT_INTERNAL_H */

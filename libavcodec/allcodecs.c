@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "config_components.h"
 #include "libavutil/thread.h"
 #include "codec.h"
 #include "codec_id.h"
@@ -437,6 +438,8 @@ extern const AVCodec ff_bmv_audio_decoder;
 extern const AVCodec ff_cook_decoder;
 extern const AVCodec ff_dca_encoder;
 extern const AVCodec ff_dca_decoder;
+extern const AVCodec ff_dfpwm_encoder;
+extern const AVCodec ff_dfpwm_decoder;
 extern const AVCodec ff_dolby_e_decoder;
 extern const AVCodec ff_dsd_lsbf_decoder;
 extern const AVCodec ff_dsd_msbf_decoder;
@@ -531,6 +534,7 @@ extern const AVCodec ff_xma2_decoder;
 /* PCM codecs */
 extern const AVCodec ff_pcm_alaw_encoder;
 extern const AVCodec ff_pcm_alaw_decoder;
+extern const AVCodec ff_pcm_bluray_encoder;
 extern const AVCodec ff_pcm_bluray_decoder;
 extern const AVCodec ff_pcm_dvd_encoder;
 extern const AVCodec ff_pcm_dvd_decoder;

@@ -26,6 +26,8 @@
  * VC-1 and WMV3 decoder
  */
 
+#include "config_components.h"
+
 #include "avcodec.h"
 #include "blockdsp.h"
 #include "get_bits.h"
@@ -33,8 +35,9 @@
 #include "internal.h"
 #include "mpeg_er.h"
 #include "mpegvideo.h"
-#include "msmpeg4.h"
+#include "mpegvideodec.h"
 #include "msmpeg4data.h"
+#include "msmpeg4dec.h"
 #include "profiles.h"
 #include "vc1.h"
 #include "vc1data.h"
@@ -872,13 +875,6 @@ static int vc1_decode_frame(AVCodecContext *avctx, void *data,
         goto end;
     }
 
-    if (s->next_p_frame_damaged) {
-        if (s->pict_type == AV_PICTURE_TYPE_B)
-            goto end;
-        else
-            s->next_p_frame_damaged = 0;
-    }
-
     if ((ret = ff_mpv_frame_start(s, avctx)) < 0) {
         goto err;
     }
@@ -1216,6 +1212,7 @@ const AVCodec ff_vc1_decoder = {
     .decode         = vc1_decode_frame,
     .flush          = ff_mpeg_flush,
     .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
     .pix_fmts       = vc1_hwaccel_pixfmt_list_420,
     .hw_configs     = (const AVCodecHWConfigInternal *const []) {
 #if CONFIG_VC1_DXVA2_HWACCEL
@@ -1253,6 +1250,7 @@ const AVCodec ff_wmv3_decoder = {
     .decode         = vc1_decode_frame,
     .flush          = ff_mpeg_flush,
     .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
     .pix_fmts       = vc1_hwaccel_pixfmt_list_420,
     .hw_configs     = (const AVCodecHWConfigInternal *const []) {
 #if CONFIG_WMV3_DXVA2_HWACCEL
@@ -1290,6 +1288,7 @@ const AVCodec ff_wmv3image_decoder = {
     .close          = ff_vc1_decode_end,
     .decode         = vc1_decode_frame,
     .capabilities   = AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
     .flush          = vc1_sprite_flush,
     .pix_fmts       = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV420P,
@@ -1309,6 +1308,7 @@ const AVCodec ff_vc1image_decoder = {
     .close          = ff_vc1_decode_end,
     .decode         = vc1_decode_frame,
     .capabilities   = AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
     .flush          = vc1_sprite_flush,
     .pix_fmts       = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV420P,

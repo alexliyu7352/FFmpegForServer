@@ -21,6 +21,7 @@
  */
 
 #include "config.h"
+#include "config_components.h"
 #include "videotoolbox.h"
 #include "libavutil/hwcontext_videotoolbox.h"
 #include "vt_internal.h"
@@ -29,6 +30,7 @@
 #include "libavutil/pixdesc.h"
 #include "bytestream.h"
 #include "decode.h"
+#include "internal.h"
 #include "h264dec.h"
 #include "hevcdec.h"
 #include "mpegvideo.h"
@@ -825,11 +827,13 @@ static CFDictionaryRef videotoolbox_decoder_config_create(CMVideoCodecType codec
         if (data)
             CFDictionarySetValue(avc_info, CFSTR("hvcC"), data);
         break;
+#if CONFIG_VP9_VIDEOTOOLBOX_HWACCEL
     case kCMVideoCodecType_VP9 :
         data = ff_videotoolbox_vpcc_extradata_create(avctx);
         if (data)
             CFDictionarySetValue(avc_info, CFSTR("vpcC"), data);
         break;
+#endif
     default:
         break;
     }

@@ -341,7 +341,6 @@ static const VulkanOptExtension optional_instance_exts[] = {
 static const VulkanOptExtension optional_device_exts[] = {
     /* Misc or required by other extensions */
     { VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,                  FF_VK_EXT_NO_FLAG                },
-    { VK_EXT_HDR_METADATA_EXTENSION_NAME,                     FF_VK_EXT_NO_FLAG                },
     { VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,         FF_VK_EXT_NO_FLAG                },
     { VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,                FF_VK_EXT_NO_FLAG                },
 
@@ -1055,7 +1054,7 @@ static int setup_queue_families(AVHWDeviceContext *ctx, VkDeviceCreateInfo *cd)
     SETUP_QUEUE(enc_index)
     SETUP_QUEUE(dec_index)
 
-#undef ADD_QUEUE
+#undef SETUP_QUEUE
 
     av_free(qf);
 
@@ -1322,8 +1321,18 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
     VulkanDevicePriv *p = ctx->internal->priv;
     FFVulkanFunctions *vk = &p->vkfn;
     AVVulkanDeviceContext *hwctx = ctx->hwctx;
+
+    /*
+     * VkPhysicalDeviceVulkan12Features has a timelineSemaphore field, but
+     * MoltenVK doesn't implement VkPhysicalDeviceVulkan12Features yet, so we
+     * use VkPhysicalDeviceTimelineSemaphoreFeatures directly.
+     */
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline_features = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES,
+    };
     VkPhysicalDeviceVulkan12Features dev_features_1_2 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &timeline_features,
     };
     VkPhysicalDeviceVulkan11Features dev_features_1_1 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
@@ -1367,7 +1376,7 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
 #undef COPY_FEATURE
 
     /* We require timeline semaphores */
-    if (!dev_features_1_2.timelineSemaphore) {
+    if (!timeline_features.timelineSemaphore) {
         av_log(ctx, AV_LOG_ERROR, "Device does not support timeline semaphores!\n");
         err = AVERROR(ENOSYS);
         goto end;
@@ -1873,12 +1882,14 @@ static int alloc_bind_mem(AVHWFramesContext *hwfc, AVVkFrame *f,
 
         f->size[0] = cont_memory_requirements.size;
 
-        for (int i = 0; i < planes; i++) {
-            bind_info[i].sType  = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
-            bind_info[i].image  = f->img[i];
-            bind_info[i].memory = f->mem[0];
-            bind_info[i].memoryOffset = !i ? 0 : cont_mem_size_list[i - 1];
+        for (int i = 0, offset = 0; i < planes; i++) {
+            bind_info[i].sType        = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
+            bind_info[i].image        = f->img[i];
+            bind_info[i].memory       = f->mem[0];
+            bind_info[i].memoryOffset = offset;
+
             f->offset[i] = bind_info[i].memoryOffset;
+            offset += cont_mem_size_list[i];
         }
     }
 
@@ -2926,6 +2937,7 @@ static int vulkan_map_from_drm(AVHWFramesContext *hwfc, AVFrame *dst,
 
 fail:
     vulkan_frame_free(hwfc->device_ctx->hwctx, (uint8_t *)f);
+    dst->data[0] = NULL;
     return err;
 }
 

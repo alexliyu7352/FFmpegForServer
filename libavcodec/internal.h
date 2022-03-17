@@ -149,7 +149,7 @@ typedef struct AVCodecInternal {
      * for decoding.
      */
     AVPacket *last_pkt_props;
-    AVFifoBuffer *pkt_props;
+    AVFifo *pkt_props;
 
     /**
      * temporary buffer used for encoders to store their bitstream
@@ -208,8 +208,11 @@ typedef struct AVCodecInternal {
     int initial_format;
     int initial_width, initial_height;
     int initial_sample_rate;
+#if FF_API_OLD_CHANNEL_LAYOUT
     int initial_channels;
     uint64_t initial_channel_layout;
+#endif
+    AVChannelLayout initial_ch_layout;
 } AVCodecInternal;
 
 struct AVCodecDefault {
@@ -225,7 +228,7 @@ extern const uint8_t ff_log2_run[41];
  */
 int ff_match_2uint16(const uint16_t (*tab)[2], int size, int a, int b);
 
-unsigned int avpriv_toupper4(unsigned int x);
+unsigned int ff_toupper4(unsigned int x);
 
 void ff_color_frame(AVFrame *frame, const int color[4]);
 
@@ -284,10 +287,6 @@ int ff_reget_buffer(AVCodecContext *avctx, AVFrame *frame, int flags);
 int ff_thread_can_start_frame(AVCodecContext *avctx);
 
 int avpriv_h264_has_num_reorder_frames(AVCodecContext *avctx);
-
-const uint8_t *avpriv_find_start_code(const uint8_t *p,
-                                      const uint8_t *end,
-                                      uint32_t *state);
 
 int avpriv_codec_get_cap_skip_frame_fill_param(const AVCodec *codec);
 
@@ -362,11 +361,5 @@ int ff_int_from_list_or_default(void *ctx, const char * val_name, int val,
                                 const int * array_valid_values, int default_value);
 
 void ff_dvdsub_parse_palette(uint32_t *palette, const char *p);
-
-#if defined(_WIN32) && CONFIG_SHARED && !defined(BUILDING_avcodec)
-#    define av_export_avcodec __declspec(dllimport)
-#else
-#    define av_export_avcodec
-#endif
 
 #endif /* AVCODEC_INTERNAL_H */

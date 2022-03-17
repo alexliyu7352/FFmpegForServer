@@ -32,6 +32,8 @@
 
 #define UNCHECKED_BITSTREAM_READER 1
 
+#include "config_components.h"
+
 #include "avcodec.h"
 #include "get_bits.h"
 #include "huffyuv.h"
@@ -1185,7 +1187,6 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     HYuvContext *s = avctx->priv_data;
     const int width  = s->width;
     const int height = s->height;
-    ThreadFrame frame = { .f = data };
     AVFrame *const p = data;
     int slice, table_size = 0, ret, nb_slices;
     unsigned slices_info_offset;
@@ -1203,7 +1204,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame,
     s->bdsp.bswap_buf((uint32_t *) s->bitstream_buffer,
                       (const uint32_t *) buf, buf_size / 4);
 
-    if ((ret = ff_thread_get_buffer(avctx, &frame, 0)) < 0)
+    if ((ret = ff_thread_get_buffer(avctx, p, 0)) < 0)
         return ret;
 
     if (s->context) {

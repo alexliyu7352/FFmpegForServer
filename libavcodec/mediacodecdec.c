@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include <stdint.h>
 #include <string.h>
 
@@ -33,6 +35,7 @@
 #include "avcodec.h"
 #include "decode.h"
 #include "h264_parse.h"
+#include "h264_ps.h"
 #include "hevc_parse.h"
 #include "hwconfig.h"
 #include "internal.h"

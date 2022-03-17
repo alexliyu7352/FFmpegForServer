@@ -41,6 +41,7 @@
 #include "mpeg4audio.h"
 #include "sinewin.h"
 #include "profiles.h"
+#include "version.h"
 
 #include "aac.h"
 #include "aactab.h"
@@ -962,11 +963,11 @@ static av_cold int aac_encode_init(AVCodecContext *avctx)
     s->lambda = avctx->global_quality > 0 ? avctx->global_quality : 120;
 
     /* Channel map and unspecified bitrate guessing */
-    s->channels = avctx->channels;
+    s->channels = avctx->ch_layout.nb_channels;
 
     s->needs_pce = 1;
     for (i = 0; i < FF_ARRAY_ELEMS(aac_normal_chan_layouts); i++) {
-        if (avctx->channel_layout == aac_normal_chan_layouts[i]) {
+        if (!av_channel_layout_compare(&avctx->ch_layout, &aac_normal_chan_layouts[i])) {
             s->needs_pce = s->options.pce;
             break;
         }
@@ -975,10 +976,13 @@ static av_cold int aac_encode_init(AVCodecContext *avctx)
     if (s->needs_pce) {
         char buf[64];
         for (i = 0; i < FF_ARRAY_ELEMS(aac_pce_configs); i++)
-            if (avctx->channel_layout == aac_pce_configs[i].layout)
+            if (!av_channel_layout_compare(&avctx->ch_layout, &aac_pce_configs[i].layout))
                 break;
-        av_get_channel_layout_string(buf, sizeof(buf), -1, avctx->channel_layout);
-        ERROR_IF(i == FF_ARRAY_ELEMS(aac_pce_configs), "Unsupported channel layout \"%s\"\n", buf);
+        av_channel_layout_describe(&avctx->ch_layout, buf, sizeof(buf));
+        if (i == FF_ARRAY_ELEMS(aac_pce_configs)) {
+            av_log(avctx, AV_LOG_ERROR, "Unsupported channel layout \"%s\"\n", buf);
+            return AVERROR(EINVAL);
+        }
         av_log(avctx, AV_LOG_INFO, "Using a PCE to encode channel layout \"%s\"\n", buf);
         s->pce = aac_pce_configs[i];
         s->reorder_map = s->pce.reorder_map;
@@ -998,7 +1002,7 @@ static av_cold int aac_encode_init(AVCodecContext *avctx)
 
     /* Samplerate */
     for (i = 0; i < 16; i++)
-        if (avctx->sample_rate == avpriv_mpeg4audio_sample_rates[i])
+        if (avctx->sample_rate == ff_mpeg4audio_sample_rates[i])
             break;
     s->samplerate_index = i;
     ERROR_IF(s->samplerate_index == 16 ||
@@ -1143,7 +1147,7 @@ const AVCodec ff_aac_encoder = {
     .encode2        = aac_encode_frame,
     .close          = aac_encode_end,
     .defaults       = aac_encode_defaults,
-    .supported_samplerates = mpeg4audio_sample_rates,
+    .supported_samplerates = ff_mpeg4audio_sample_rates,
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
     .capabilities   = AV_CODEC_CAP_SMALL_LAST_FRAME | AV_CODEC_CAP_DELAY,
     .sample_fmts    = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_FLTP,

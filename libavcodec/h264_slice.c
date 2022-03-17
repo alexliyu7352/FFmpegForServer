@@ -25,10 +25,12 @@
  * @author Michael Niedermayer <michaelni@gmx.at>
  */
 
+#include "config_components.h"
+
 #include "libavutil/avassert.h"
 #include "libavutil/display.h"
-#include "libavutil/imgutils.h"
 #include "libavutil/film_grain_params.h"
+#include "libavutil/pixdesc.h"
 #include "libavutil/stereo3d.h"
 #include "libavutil/timecode.h"
 #include "internal.h"
@@ -40,13 +42,13 @@
 #include "h264dec.h"
 #include "h264data.h"
 #include "h264chroma.h"
-#include "h264_mvpred.h"
 #include "h264_ps.h"
 #include "golomb.h"
 #include "mathops.h"
 #include "mpegutils.h"
 #include "rectangle.h"
 #include "thread.h"
+#include "threadframe.h"
 
 static const uint8_t field_scan[16+1] = {
     0 + 0 * 4, 0 + 1 * 4, 1 + 0 * 4, 0 + 2 * 4,
@@ -192,17 +194,16 @@ static int alloc_picture(H264Context *h, H264Picture *pic)
     av_assert0(!pic->f->data[0]);
 
     pic->tf.f = pic->f;
-    ret = ff_thread_get_buffer(h->avctx, &pic->tf, pic->reference ?
-                                                   AV_GET_BUFFER_FLAG_REF : 0);
+    ret = ff_thread_get_ext_buffer(h->avctx, &pic->tf,
+                                   pic->reference ? AV_GET_BUFFER_FLAG_REF : 0);
     if (ret < 0)
         goto fail;
 
     if (pic->needs_fg) {
-        pic->tf_grain.f = pic->f_grain;
         pic->f_grain->format = pic->f->format;
         pic->f_grain->width = pic->f->width;
         pic->f_grain->height = pic->f->height;
-        ret = ff_thread_get_buffer(h->avctx, &pic->tf_grain, 0);
+        ret = ff_thread_get_buffer(h->avctx, pic->f_grain, 0);
         if (ret < 0)
             goto fail;
     }
@@ -428,7 +429,7 @@ int ff_h264_update_thread_context(AVCodecContext *dst,
     copy_picture_range(h->short_ref, h1->short_ref, 32, h, h1);
     copy_picture_range(h->long_ref, h1->long_ref, 32, h, h1);
     copy_picture_range(h->delayed_pic, h1->delayed_pic,
-                       MAX_DELAYED_PIC_COUNT + 2, h, h1);
+                       FF_ARRAY_ELEMS(h->delayed_pic), h, h1);
 
     h->frame_recovered       = h1->frame_recovered;
 
@@ -998,7 +999,7 @@ static int h264_slice_header_init(H264Context *h)
                     sps->chroma_format_idc);
     ff_h264chroma_init(&h->h264chroma, sps->bit_depth_chroma);
     ff_h264qpel_init(&h->h264qpel, sps->bit_depth_luma);
-    ff_h264_pred_init(&h->hpc, h->avctx->codec_id, sps->bit_depth_luma,
+    ff_h264_pred_init(&h->hpc, AV_CODEC_ID_H264, sps->bit_depth_luma,
                       sps->chroma_format_idc);
     ff_videodsp_init(&h->vdsp, sps->bit_depth_luma);
 
@@ -1456,7 +1457,7 @@ static int h264_select_output_frame(H264Context *h)
     }
 
     for (i = 0; 1; i++) {
-        if(i == MAX_DELAYED_PIC_COUNT || cur->poc < h->last_pocs[i]){
+        if(i == H264_MAX_DPB_FRAMES || cur->poc < h->last_pocs[i]){
             if(i)
                 h->last_pocs[i-1] = cur->poc;
             break;
@@ -1464,13 +1465,13 @@ static int h264_select_output_frame(H264Context *h)
             h->last_pocs[i-1]= h->last_pocs[i];
         }
     }
-    out_of_order = MAX_DELAYED_PIC_COUNT - i;
+    out_of_order = H264_MAX_DPB_FRAMES - i;
     if(   cur->f->pict_type == AV_PICTURE_TYPE_B
-       || (h->last_pocs[MAX_DELAYED_PIC_COUNT-2] > INT_MIN && h->last_pocs[MAX_DELAYED_PIC_COUNT-1] - (int64_t)h->last_pocs[MAX_DELAYED_PIC_COUNT-2] > 2))
+       || (h->last_pocs[H264_MAX_DPB_FRAMES-2] > INT_MIN && h->last_pocs[H264_MAX_DPB_FRAMES-1] - (int64_t)h->last_pocs[H264_MAX_DPB_FRAMES-2] > 2))
         out_of_order = FFMAX(out_of_order, 1);
-    if (out_of_order == MAX_DELAYED_PIC_COUNT) {
+    if (out_of_order == H264_MAX_DPB_FRAMES) {
         av_log(h->avctx, AV_LOG_VERBOSE, "Invalid POC %d<%d\n", cur->poc, h->last_pocs[0]);
-        for (i = 1; i < MAX_DELAYED_PIC_COUNT; i++)
+        for (i = 1; i < H264_MAX_DPB_FRAMES; i++)
             h->last_pocs[i] = INT_MIN;
         h->last_pocs[0] = cur->poc;
         cur->mmco_reset = 1;
@@ -1484,7 +1485,7 @@ static int h264_select_output_frame(H264Context *h)
     while (h->delayed_pic[pics])
         pics++;
 
-    av_assert0(pics <= MAX_DELAYED_PIC_COUNT);
+    av_assert0(pics <= H264_MAX_DPB_FRAMES);
 
     h->delayed_pic[pics++] = cur;
     if (cur->reference == 0)
@@ -1700,7 +1701,7 @@ static int h264_field_start(H264Context *h, const H264SliceContext *sl,
                 ff_thread_await_progress(&prev->tf, INT_MAX, 0);
                 if (prev->field_picture)
                     ff_thread_await_progress(&prev->tf, INT_MAX, 1);
-                ff_thread_release_buffer(h->avctx, &h->short_ref[0]->tf);
+                ff_thread_release_ext_buffer(h->avctx, &h->short_ref[0]->tf);
                 h->short_ref[0]->tf.f = h->short_ref[0]->f;
                 ret = ff_thread_ref_frame(&h->short_ref[0]->tf, &prev->tf);
                 if (ret < 0)
@@ -2168,9 +2169,9 @@ static int h264_slice_init(H264Context *h, H264SliceContext *sl,
 
     if (h->avctx->debug & FF_DEBUG_PICT_INFO) {
         av_log(h->avctx, AV_LOG_DEBUG,
-               "slice:%d %s mb:%d %c%s%s frame:%d poc:%d/%d ref:%d/%d qp:%d loop:%d:%d:%d weight:%d%s %s\n",
+               "slice:%d %c mb:%d %c%s%s frame:%d poc:%d/%d ref:%d/%d qp:%d loop:%d:%d:%d weight:%d%s %s\n",
                sl->slice_num,
-               (h->picture_structure == PICT_FRAME ? "F" : h->picture_structure == PICT_TOP_FIELD ? "T" : "B"),
+               (h->picture_structure == PICT_FRAME ? 'F' : h->picture_structure == PICT_TOP_FIELD ? 'T' : 'B'),
                sl->mb_y * h->mb_width + sl->mb_x,
                av_get_picture_type_char(sl->slice_type),
                sl->slice_type_fixed ? " fix" : "",

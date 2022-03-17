@@ -2080,24 +2080,12 @@ static int jpeg2000_decode_tile(AVCodecContext *avctx, void *td,
     Jpeg2000DecoderContext *s = avctx->priv_data;
     AVFrame *picture = td;
     Jpeg2000Tile *tile = s->tile + jobnr;
-    int x;
 
     tile_codeblocks(s, tile);
 
     /* inverse MCT transformation */
     if (tile->codsty[0].mct)
         mct_decode(s, tile);
-
-    for (x = 0; x < s->ncomponents; x++) {
-        if (s->cdef[x] < 0) {
-            for (x = 0; x < s->ncomponents; x++) {
-                s->cdef[x] = x + 1;
-            }
-            if ((s->ncomponents & 1) == 0)
-                s->cdef[s->ncomponents-1] = 0;
-            break;
-        }
-    }
 
     if (s->precision <= 8) {
         write_frame_8(s, tile, picture, 8);
@@ -2488,7 +2476,6 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, void *data,
                                  int *got_frame, AVPacket *avpkt)
 {
     Jpeg2000DecoderContext *s = avctx->priv_data;
-    ThreadFrame frame = { .f = data };
     AVFrame *picture = data;
     int ret;
 
@@ -2529,13 +2516,24 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, void *data,
         goto end;
 
     /* get picture buffer */
-    if ((ret = ff_thread_get_buffer(avctx, &frame, 0)) < 0)
+    if ((ret = ff_thread_get_buffer(avctx, picture, 0)) < 0)
         goto end;
     picture->pict_type = AV_PICTURE_TYPE_I;
     picture->key_frame = 1;
 
     if (ret = jpeg2000_read_bitstream_packets(s))
         goto end;
+
+    for (int x = 0; x < s->ncomponents; x++) {
+        if (s->cdef[x] < 0) {
+            for (x = 0; x < s->ncomponents; x++) {
+                s->cdef[x] = x + 1;
+            }
+            if ((s->ncomponents & 1) == 0)
+                s->cdef[s->ncomponents-1] = 0;
+            break;
+        }
+    }
 
     avctx->execute2(avctx, jpeg2000_decode_tile, picture, NULL, s->numXtiles * s->numYtiles);
 

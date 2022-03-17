@@ -24,6 +24,8 @@
  * GSM decoder
  */
 
+#include "config_components.h"
+
 #include "libavutil/channel_layout.h"
 #include "avcodec.h"
 #include "get_bits.h"
@@ -34,8 +36,8 @@
 
 static av_cold int gsm_init(AVCodecContext *avctx)
 {
-    avctx->channels       = 1;
-    avctx->channel_layout = AV_CH_LAYOUT_MONO;
+    av_channel_layout_uninit(&avctx->ch_layout);
+    avctx->ch_layout      = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
     if (!avctx->sample_rate)
         avctx->sample_rate = 8000;
     avctx->sample_fmt     = AV_SAMPLE_FMT_S16;

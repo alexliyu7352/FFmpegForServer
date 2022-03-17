@@ -37,6 +37,8 @@
  * Supports: BGR24 (RGB 24bpp)
  */
 
+#include "config_components.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -158,7 +160,6 @@ static int zlib_decomp(AVCodecContext *avctx, const uint8_t *src, int src_len, i
 static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPacket *avpkt)
 {
     AVFrame *frame = data;
-    ThreadFrame tframe = { .f = data };
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     LclDecContext * const c = avctx->priv_data;
@@ -175,7 +176,7 @@ static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame, AVPac
     unsigned int len = buf_size;
     int linesize, offset;
 
-    if ((ret = ff_thread_get_buffer(avctx, &tframe, 0)) < 0)
+    if ((ret = ff_thread_get_buffer(avctx, frame, 0)) < 0)
         return ret;
 
     outptr = frame->data[0]; // Output image pointer

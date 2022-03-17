@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include "libavutil/avstring.h"
 #include "libavutil/bprint.h"
 #include "libavutil/opt.h"
@@ -158,6 +160,8 @@ const AVInputFormat *av_probe_input_format3(const AVProbeData *pd,
     }
 
     while ((fmt1 = av_demuxer_iterate(&i))) {
+        if (fmt1->flags & AVFMT_EXPERIMENTAL)
+            continue;
         if (!is_opened == !(fmt1->flags & AVFMT_NOFILE) && strcmp(fmt1->name, "image2"))
             continue;
         score = 0;

@@ -27,8 +27,13 @@
 #include "mpegutils.h"
 #include "mpegvideo.h"
 #include "h263.h"
+#include "h263enc.h"
 #include "mpeg4video.h"
+#include "mpeg4videodata.h"
+#include "mpeg4videoenc.h"
+#include "mpegvideoenc.h"
 #include "profiles.h"
+#include "version.h"
 
 /* The uni_DCtab_* tables below contain unified bits+length tables to encode DC
  * differences in MPEG-4. Unified in the sense that the specification specifies
@@ -560,8 +565,6 @@ void ff_mpeg4_encode_mb(MpegEncContext *s, int16_t block[6][64],
             if (!mb_type) {
                 av_assert2(s->mv_dir & MV_DIRECT);
                 ff_h263_encode_motion_vector(s, motion_x, motion_y, 1);
-                s->b_count++;
-                s->f_count++;
             } else {
                 av_assert2(mb_type > 0 && mb_type < 4);
                 if (s->mv_type != MV_TYPE_FIELD) {
@@ -574,7 +577,6 @@ void ff_mpeg4_encode_mb(MpegEncContext *s, int16_t block[6][64],
                         s->last_mv[0][1][0] = s->mv[0][0][0];
                         s->last_mv[0][0][1] =
                         s->last_mv[0][1][1] = s->mv[0][0][1];
-                        s->f_count++;
                     }
                     if (s->mv_dir & MV_DIR_BACKWARD) {
                         ff_h263_encode_motion_vector(s,
@@ -585,7 +587,6 @@ void ff_mpeg4_encode_mb(MpegEncContext *s, int16_t block[6][64],
                         s->last_mv[1][1][0] = s->mv[1][0][0];
                         s->last_mv[1][0][1] =
                         s->last_mv[1][1][1] = s->mv[1][0][1];
-                        s->b_count++;
                     }
                 } else {
                     if (s->mv_dir & MV_DIR_FORWARD) {
@@ -605,7 +606,6 @@ void ff_mpeg4_encode_mb(MpegEncContext *s, int16_t block[6][64],
                             s->last_mv[0][i][0] = s->mv[0][i][0];
                             s->last_mv[0][i][1] = s->mv[0][i][1] * 2;
                         }
-                        s->f_count++;
                     }
                     if (s->mv_dir & MV_DIR_BACKWARD) {
                         for (i = 0; i < 2; i++) {
@@ -616,7 +616,6 @@ void ff_mpeg4_encode_mb(MpegEncContext *s, int16_t block[6][64],
                             s->last_mv[1][i][0] = s->mv[1][i][0];
                             s->last_mv[1][i][1] = s->mv[1][i][1] * 2;
                         }
-                        s->b_count++;
                     }
                 }
             }
@@ -792,8 +791,6 @@ void ff_mpeg4_encode_mb(MpegEncContext *s, int16_t block[6][64],
 
             if (interleaved_stats)
                 s->p_tex_bits += get_bits_diff(s);
-
-            s->f_count++;
         }
     } else {
         int cbp;
@@ -960,14 +957,14 @@ static void mpeg4_encode_vol_header(MpegEncContext *s,
                                     int vo_number,
                                     int vol_number)
 {
-    int vo_ver_id;
+    int vo_ver_id, vo_type, aspect_ratio_info;
 
     if (s->max_b_frames || s->quarter_sample) {
         vo_ver_id  = 5;
-        s->vo_type = ADV_SIMPLE_VO_TYPE;
+        vo_type = ADV_SIMPLE_VO_TYPE;
     } else {
         vo_ver_id  = 1;
-        s->vo_type = SIMPLE_VO_TYPE;
+        vo_type = SIMPLE_VO_TYPE;
     }
 
     put_bits(&s->pb, 16, 0);
@@ -976,7 +973,7 @@ static void mpeg4_encode_vol_header(MpegEncContext *s,
     put_bits(&s->pb, 16, 0x120 + vol_number);       /* video obj layer */
 
     put_bits(&s->pb, 1, 0);             /* random access vol */
-    put_bits(&s->pb, 8, s->vo_type);    /* video obj type indication */
+    put_bits(&s->pb, 8, vo_type);       /* video obj type indication */
     if (s->workaround_bugs & FF_BUG_MS) {
         put_bits(&s->pb, 1, 0);         /* is obj layer id= no */
     } else {
@@ -985,10 +982,10 @@ static void mpeg4_encode_vol_header(MpegEncContext *s,
         put_bits(&s->pb, 3, 1);         /* is obj layer priority */
     }
 
-    s->aspect_ratio_info = ff_h263_aspect_to_info(s->avctx->sample_aspect_ratio);
+    aspect_ratio_info = ff_h263_aspect_to_info(s->avctx->sample_aspect_ratio);
 
-    put_bits(&s->pb, 4, s->aspect_ratio_info); /* aspect ratio info */
-    if (s->aspect_ratio_info == FF_ASPECT_EXTENDED) {
+    put_bits(&s->pb, 4, aspect_ratio_info); /* aspect ratio info */
+    if (aspect_ratio_info == FF_ASPECT_EXTENDED) {
         av_reduce(&s->avctx->sample_aspect_ratio.num, &s->avctx->sample_aspect_ratio.den,
                    s->avctx->sample_aspect_ratio.num,  s->avctx->sample_aspect_ratio.den, 255);
         put_bits(&s->pb, 8, s->avctx->sample_aspect_ratio.num);

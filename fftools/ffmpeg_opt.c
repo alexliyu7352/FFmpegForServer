@@ -507,7 +507,7 @@ static int opt_map_channel(void *optctx, const char *opt, const char *arg)
     /* allow trailing ? to map_channel */
     if (allow_unused = strchr(mapchan, '?'))
         *allow_unused = 0;
-    if (m->channel_idx < 0 || m->channel_idx >= st->codecpar->channels ||
+    if (m->channel_idx < 0 || m->channel_idx >= st->codecpar->ch_layout.nb_channels ||
         input_streams[input_files[m->file_idx]->ist_index + m->stream_idx]->user_set_discard == AVDISCARD_ALL) {
         if (allow_unused) {
             av_log(NULL, AV_LOG_VERBOSE, "mapchan: invalid audio channel #%d.%d.%d\n",
@@ -784,7 +784,7 @@ static void add_input_streams(OptionsContext *o, AVFormatContext *ic)
     for (i = 0; i < ic->nb_streams; i++) {
         AVStream *st = ic->streams[i];
         AVCodecParameters *par = st->codecpar;
-        InputStream *ist = av_mallocz(sizeof(*ist));
+        InputStream *ist;
         char *framerate = NULL, *hwaccel_device = NULL;
         const char *hwaccel = NULL;
         char *hwaccel_output_format = NULL;
@@ -795,12 +795,7 @@ static void add_input_streams(OptionsContext *o, AVFormatContext *ic)
         const AVOption *discard_opt = av_opt_find(&cc, "skip_frame", NULL,
                                                   0, AV_OPT_SEARCH_FAKE_OBJ);
 
-        if (!ist)
-            exit_program(1);
-
-        GROW_ARRAY(input_streams, nb_input_streams);
-        input_streams[nb_input_streams - 1] = ist;
-
+        ist = ALLOC_ARRAY_ELEM(input_streams, nb_input_streams);
         ist->st = st;
         ist->file_index = nb_input_files;
         ist->discard = 1;
@@ -1445,10 +1440,7 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
     if (oc->nb_streams - 1 < o->nb_streamid_map)
         st->id = o->streamid_map[oc->nb_streams - 1];
 
-    GROW_ARRAY(output_streams, nb_output_streams);
-    if (!(ost = av_mallocz(sizeof(*ost))))
-        exit_program(1);
-    output_streams[nb_output_streams - 1] = ost;
+    ost = ALLOC_ARRAY_ELEM(output_streams, nb_output_streams);
 
     ost->file_index = nb_output_files - 1;
     ost->index      = idx;
@@ -1589,8 +1581,6 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
 
     ost->max_muxing_queue_size = 128;
     MATCH_PER_STREAM_OPT(max_muxing_queue_size, i, ost->max_muxing_queue_size, oc, st);
-    ost->max_muxing_queue_size = FFMIN(ost->max_muxing_queue_size, INT_MAX / sizeof(ost->pkt));
-    ost->max_muxing_queue_size *= sizeof(ost->pkt);
 
     ost->muxing_queue_data_size = 0;
 
@@ -1617,9 +1607,12 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
     }
     ost->last_mux_dts = AV_NOPTS_VALUE;
 
-    ost->muxing_queue = av_fifo_alloc(8 * sizeof(AVPacket));
+    ost->muxing_queue = av_fifo_alloc2(8, sizeof(AVPacket*), 0);
     if (!ost->muxing_queue)
         exit_program(1);
+
+    MATCH_PER_STREAM_OPT(copy_initial_nonkeyframes, i,
+                         ost->copy_initial_nonkeyframes, oc, st);
 
     return ost;
 }
@@ -1927,8 +1920,6 @@ static OutputStream *new_video_stream(OptionsContext *o, AVFormatContext *oc, in
         ost->last_frame = av_frame_alloc();
         if (!ost->last_frame)
             exit_program(1);
-    } else {
-        MATCH_PER_STREAM_OPT(copy_initial_nonkeyframes, i, ost->copy_initial_nonkeyframes, oc ,st);
     }
 
     if (ost->stream_copy)
@@ -1954,9 +1945,14 @@ static OutputStream *new_audio_stream(OptionsContext *o, AVFormatContext *oc, in
     MATCH_PER_STREAM_OPT(filters,        str, ost->filters,        oc, st);
 
     if (!ost->stream_copy) {
+        int channels = 0;
         char *sample_fmt = NULL;
 
-        MATCH_PER_STREAM_OPT(audio_channels, i, audio_enc->channels, oc, st);
+        MATCH_PER_STREAM_OPT(audio_channels, i, channels, oc, st);
+        if (channels) {
+            audio_enc->ch_layout.order       = AV_CHANNEL_ORDER_UNSPEC;
+            audio_enc->ch_layout.nb_channels = channels;
+        }
 
         MATCH_PER_STREAM_OPT(sample_fmts, str, sample_fmt, oc, st);
         if (sample_fmt &&
@@ -2055,8 +2051,6 @@ static OutputStream *new_subtitle_stream(OptionsContext *o, AVFormatContext *oc,
     subtitle_enc = ost->enc_ctx;
 
     subtitle_enc->codec_type = AVMEDIA_TYPE_SUBTITLE;
-
-    MATCH_PER_STREAM_OPT(copy_initial_nonkeyframes, i, ost->copy_initial_nonkeyframes, oc, st);
 
     if (!ost->stream_copy) {
         char *frame_size = NULL;
@@ -2378,7 +2372,7 @@ static int open_output_file(OptionsContext *o, const char *filename)
                 for (i = 0; i < ifile->nb_streams; i++) {
                     int score;
                     ist = input_streams[ifile->ist_index + i];
-                    score = ist->st->codecpar->channels
+                    score = ist->st->codecpar->ch_layout.nb_channels
                             + 100000000 * !!(ist->st->event_flags & AVSTREAM_EVENT_FLAG_NEW_PACKETS)
                             + 5000000*!!(ist->st->disposition & AV_DISPOSITION_DEFAULT);
                     if (ist->user_set_discard == AVDISCARD_ALL)
@@ -2612,6 +2606,7 @@ loop_end:
         if (ost->encoding_needed && ost->source_index >= 0) {
             InputStream *ist = input_streams[ost->source_index];
             ist->decoding_needed |= DECODING_FOR_OST;
+            ist->processing_needed = 1;
 
             if (ost->st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO ||
                 ost->st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -2624,6 +2619,9 @@ loop_end:
                     exit_program(1);
                 }
             }
+        } else if (ost->stream_copy && ost->source_index >= 0) {
+            InputStream *ist = input_streams[ost->source_index];
+            ist->processing_needed = 1;
         }
 
         /* set the filter output constraints */
@@ -2651,10 +2649,10 @@ loop_end:
                 } else {
                     f->sample_rates = ost->enc->supported_samplerates;
                 }
-                if (ost->enc_ctx->channels) {
-                    f->channel_layout = av_get_default_channel_layout(ost->enc_ctx->channels);
-                } else {
-                    f->channel_layouts = ost->enc->channel_layouts;
+                if (ost->enc_ctx->ch_layout.nb_channels) {
+                    av_channel_layout_default(&f->ch_layout, ost->enc_ctx->ch_layout.nb_channels);
+                } else if (ost->enc->ch_layouts) {
+                    f->ch_layouts = ost->enc->ch_layouts;
                 }
                 break;
             }
@@ -3243,22 +3241,34 @@ static int opt_channel_layout(void *optctx, const char *opt, const char *arg)
     char layout_str[32];
     char *stream_str;
     char *ac_str;
-    int ret, channels, ac_str_size;
-    uint64_t layout;
+    int ret, ac_str_size;
+    AVChannelLayout layout = { 0 };
 
-    layout = av_get_channel_layout(arg);
-    if (!layout) {
+    ret = av_channel_layout_from_string(&layout, arg);
+    if (ret < 0) {
+#if FF_API_OLD_CHANNEL_LAYOUT
+        uint64_t mask;
+        AV_NOWARN_DEPRECATED({
+        mask = av_get_channel_layout(arg);
+        })
+        if (!mask) {
+#endif
         av_log(NULL, AV_LOG_ERROR, "Unknown channel layout: %s\n", arg);
         return AVERROR(EINVAL);
+#if FF_API_OLD_CHANNEL_LAYOUT
+        }
+        av_log(NULL, AV_LOG_WARNING, "Channel layout '%s' uses a deprecated syntax.\n",
+               arg);
+        av_channel_layout_from_mask(&layout, mask);
+#endif
     }
-    snprintf(layout_str, sizeof(layout_str), "%"PRIu64, layout);
-    ret = opt_default_new(o, opt, layout_str);
+
+    ret = opt_default_new(o, opt, arg);
     if (ret < 0)
         return ret;
 
     /* set 'ac' option based on channel layout */
-    channels = av_get_channel_layout_nb_channels(layout);
-    snprintf(layout_str, sizeof(layout_str), "%d", channels);
+    snprintf(layout_str, sizeof(layout_str), "%d", layout.nb_channels);
     stream_str = strchr(opt, ':');
     ac_str_size = 3 + (stream_str ? strlen(stream_str) : 0);
     ac_str = av_mallocz(ac_str_size);
@@ -3281,9 +3291,8 @@ static int opt_audio_qscale(void *optctx, const char *opt, const char *arg)
 
 static int opt_filter_complex(void *optctx, const char *opt, const char *arg)
 {
-    FilterGraph *fg;
-    ALLOC_ARRAY_ELEM(filtergraphs, nb_filtergraphs);
-    fg = filtergraphs[nb_filtergraphs - 1];
+    FilterGraph *fg = ALLOC_ARRAY_ELEM(filtergraphs, nb_filtergraphs);
+
     fg->index      = nb_filtergraphs - 1;
     fg->graph_desc = av_strdup(arg);
     if (!fg->graph_desc)

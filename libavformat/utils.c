@@ -46,6 +46,7 @@
 #if CONFIG_NETWORK
 #include "network.h"
 #endif
+#include "version.h"
 
 #include "libavutil/ffversion.h"
 const char av_format_ffversion[] = "FFmpeg version " FFMPEG_VERSION;
@@ -239,7 +240,6 @@ int avformat_queue_attached_pictures(AVFormatContext *s)
             }
 
             ret = avpriv_packet_list_put(&si->raw_packet_buffer,
-                                         &si->raw_packet_buffer_end,
                                      &s->streams[i]->attached_pic,
                                      av_packet_ref, 0);
             if (ret < 0)
@@ -300,9 +300,9 @@ int ff_is_intra_only(enum AVCodecID id)
 void ff_flush_packet_queue(AVFormatContext *s)
 {
     FFFormatContext *const si = ffformatcontext(s);
-    avpriv_packet_list_free(&si->parse_queue,       &si->parse_queue_end);
-    avpriv_packet_list_free(&si->packet_buffer,     &si->packet_buffer_end);
-    avpriv_packet_list_free(&si->raw_packet_buffer, &si->raw_packet_buffer_end);
+    avpriv_packet_list_free(&si->parse_queue);
+    avpriv_packet_list_free(&si->packet_buffer);
+    avpriv_packet_list_free(&si->raw_packet_buffer);
 
     si->raw_packet_buffer_size = 0;
 }
@@ -361,7 +361,7 @@ enum AVCodecID ff_codec_get_id(const AVCodecTag *tags, unsigned int tag)
         if (tag == tags[i].tag)
             return tags[i].id;
     for (int i = 0; tags[i].id != AV_CODEC_ID_NONE; i++)
-        if (avpriv_toupper4(tag) == avpriv_toupper4(tags[i].tag))
+        if (ff_toupper4(tag) == ff_toupper4(tags[i].tag))
             return tags[i].id;
     return AV_CODEC_ID_NONE;
 }
@@ -526,7 +526,7 @@ int av_find_best_stream(AVFormatContext *ic, enum AVMediaType type,
             continue;
         if (wanted_stream_nb >= 0 && real_stream_index != wanted_stream_nb)
             continue;
-        if (type == AVMEDIA_TYPE_AUDIO && !(par->channels && par->sample_rate))
+        if (type == AVMEDIA_TYPE_AUDIO && !(par->ch_layout.nb_channels && par->sample_rate))
             continue;
         if (decoder_ret) {
             decoder = ff_find_decoder(ic, st, par->codec_id);
@@ -896,10 +896,11 @@ AVChapter *avpriv_new_chapter(AVFormatContext *s, int64_t id, AVRational time_ba
     if (!s->nb_chapters) {
         si->chapter_ids_monotonic = 1;
     } else if (!si->chapter_ids_monotonic || s->chapters[s->nb_chapters-1]->id >= id) {
-        si->chapter_ids_monotonic = 0;
         for (unsigned i = 0; i < s->nb_chapters; i++)
             if (s->chapters[i]->id == id)
                 chapter = s->chapters[i];
+        if (!chapter)
+            si->chapter_ids_monotonic = 0;
     }
 
     if (!chapter) {
@@ -1136,7 +1137,7 @@ int ff_mkdir_p(const char *path)
         }
     }
 
-    if ((*(pos - 1) != '/') || (*(pos - 1) != '\\')) {
+    if ((*(pos - 1) != '/') && (*(pos - 1) != '\\')) {
         ret = mkdir(temp, 0755);
     }
 
@@ -1244,7 +1245,7 @@ void ff_parse_key_value(const char *str, ff_parse_key_val_cb callback_get_buf,
         key_len = ptr - key;
 
         callback_get_buf(context, key, key_len, &dest, &dest_len);
-        dest_end = dest + dest_len - 1;
+        dest_end = dest ? dest + dest_len - 1 : NULL;
 
         if (*ptr == '\"') {
             ptr++;
@@ -1329,6 +1330,9 @@ int ff_add_param_change(AVPacket *pkt, int32_t channels,
     uint8_t *data;
     if (!pkt)
         return AVERROR(EINVAL);
+
+#if FF_API_OLD_CHANNEL_LAYOUT
+FF_DISABLE_DEPRECATION_WARNINGS
     if (channels) {
         size  += 4;
         flags |= AV_SIDE_DATA_PARAM_CHANGE_CHANNEL_COUNT;
@@ -1337,6 +1341,8 @@ int ff_add_param_change(AVPacket *pkt, int32_t channels,
         size  += 8;
         flags |= AV_SIDE_DATA_PARAM_CHANGE_CHANNEL_LAYOUT;
     }
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
     if (sample_rate) {
         size  += 4;
         flags |= AV_SIDE_DATA_PARAM_CHANGE_SAMPLE_RATE;
@@ -1349,10 +1355,14 @@ int ff_add_param_change(AVPacket *pkt, int32_t channels,
     if (!data)
         return AVERROR(ENOMEM);
     bytestream_put_le32(&data, flags);
+#if FF_API_OLD_CHANNEL_LAYOUT
+FF_DISABLE_DEPRECATION_WARNINGS
     if (channels)
         bytestream_put_le32(&data, channels);
     if (channel_layout)
         bytestream_put_le64(&data, channel_layout);
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
     if (sample_rate)
         bytestream_put_le32(&data, sample_rate);
     if (width || height) {
@@ -1514,7 +1524,7 @@ static int match_stream_specifier(const AVFormatContext *s, const AVStream *st,
             int val;
             switch (par->codec_type) {
             case AVMEDIA_TYPE_AUDIO:
-                val = par->sample_rate && par->channels;
+                val = par->sample_rate && par->ch_layout.nb_channels;
                 if (par->format == AV_SAMPLE_FMT_NONE)
                     return 0;
                 break;
@@ -2034,4 +2044,60 @@ const char *av_disposition_to_string(int disposition)
             return opt->name;
 
     return NULL;
+}
+
+int ff_format_shift_data(AVFormatContext *s, int64_t read_start, int shift_size)
+{
+    int ret;
+    int64_t pos, pos_end;
+    uint8_t *buf, *read_buf[2];
+    int read_buf_id = 0;
+    int read_size[2];
+    AVIOContext *read_pb;
+
+    buf = av_malloc_array(shift_size, 2);
+    if (!buf)
+        return AVERROR(ENOMEM);
+    read_buf[0] = buf;
+    read_buf[1] = buf + shift_size;
+
+    /* Shift the data: the AVIO context of the output can only be used for
+     * writing, so we re-open the same output, but for reading. It also avoids
+     * a read/seek/write/seek back and forth. */
+    avio_flush(s->pb);
+    ret = s->io_open(s, &read_pb, s->url, AVIO_FLAG_READ, NULL);
+    if (ret < 0) {
+        av_log(s, AV_LOG_ERROR, "Unable to re-open %s output file for shifting data\n", s->url);
+        goto end;
+    }
+
+    /* mark the end of the shift to up to the last data we wrote, and get ready
+     * for writing */
+    pos_end = avio_tell(s->pb);
+    avio_seek(s->pb, read_start + shift_size, SEEK_SET);
+
+    avio_seek(read_pb, read_start, SEEK_SET);
+    pos = avio_tell(read_pb);
+
+#define READ_BLOCK do {                                                             \
+    read_size[read_buf_id] = avio_read(read_pb, read_buf[read_buf_id], shift_size);  \
+    read_buf_id ^= 1;                                                               \
+} while (0)
+
+    /* shift data by chunk of at most shift_size */
+    READ_BLOCK;
+    do {
+        int n;
+        READ_BLOCK;
+        n = read_size[read_buf_id];
+        if (n <= 0)
+            break;
+        avio_write(s->pb, read_buf[read_buf_id], n);
+        pos += n;
+    } while (pos < pos_end);
+    ret = ff_format_io_close(s, &read_pb);
+
+end:
+    av_free(buf);
+    return ret;
 }

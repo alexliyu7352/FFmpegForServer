@@ -241,7 +241,7 @@ typedef struct InputFilter {
     uint8_t            *name;
     enum AVMediaType    type;   // AVMEDIA_TYPE_SUBTITLE for sub2video
 
-    AVFifoBuffer *frame_queue;
+    AVFifo *frame_queue;
 
     // parameters configured for this input
     int format;
@@ -250,8 +250,7 @@ typedef struct InputFilter {
     AVRational sample_aspect_ratio;
 
     int sample_rate;
-    int channels;
-    uint64_t channel_layout;
+    AVChannelLayout ch_layout;
 
     AVBufferRef *hw_frames_ctx;
     int32_t *displaymatrix;
@@ -274,12 +273,12 @@ typedef struct OutputFilter {
     AVRational frame_rate;
     int format;
     int sample_rate;
-    uint64_t channel_layout;
+    AVChannelLayout ch_layout;
 
     // those are only set if no format is specified and the encoder gives us multiple options
     // They point directly to the relevant lists of the encoder.
     const int *formats;
-    const uint64_t *channel_layouts;
+    const AVChannelLayout *ch_layouts;
     const int *sample_rates;
 } OutputFilter;
 
@@ -307,6 +306,7 @@ typedef struct InputStream {
     int decoding_needed;     /* non zero if the packets must be decoded in 'raw_fifo', see DECODING_FOR_* */
 #define DECODING_FOR_OST    1
 #define DECODING_FOR_FILTER 2
+    int processing_needed;   /* non zero if the packets must be processed */
 
     AVCodecContext *dec_ctx;
     const AVCodec *dec;
@@ -355,7 +355,7 @@ typedef struct InputStream {
     struct sub2video {
         int64_t last_pts;
         int64_t end_pts;
-        AVFifoBuffer *sub_queue;    ///< queue of AVSubtitle* before filter init
+        AVFifo *sub_queue;    ///< queue of AVSubtitle* before filter init
         AVFrame *frame;
         int w, h;
         unsigned int initialize; ///< marks if sub2video_update should force an initialization
@@ -534,6 +534,7 @@ typedef struct OutputStream {
     int inputs_done;
 
     const char *attachment_filename;
+    int seen_kf;
     int copy_initial_nonkeyframes;
     int copy_prior_start;
     char *disposition;
@@ -555,7 +556,7 @@ typedef struct OutputStream {
     int max_muxing_queue_size;
 
     /* the packets are buffered here until the muxer is ready to be initialized */
-    AVFifoBuffer *muxing_queue;
+    AVFifo *muxing_queue;
 
     /*
      * The size of the AVPackets' buffers in queue.

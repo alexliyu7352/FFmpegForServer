@@ -34,6 +34,7 @@
 #include "fdctdsp.h"
 #include "internal.h"
 #include "mpegvideo.h"
+#include "mpegvideoenc.h"
 #include "pixblockdsp.h"
 #include "packet_internal.h"
 #include "profiles.h"
@@ -908,6 +909,7 @@ static int dnxhd_encode_thread(AVCodecContext *avctx, void *arg,
     if (put_bits_count(&ctx->m.pb) & 31)
         put_bits(&ctx->m.pb, 32 - (put_bits_count(&ctx->m.pb) & 31), 0);
     flush_put_bits(&ctx->m.pb);
+    memset(put_bits_ptr(&ctx->m.pb), 0, put_bytes_left(&ctx->m.pb, 0));
     return 0;
 }
 
@@ -923,7 +925,7 @@ static void dnxhd_setup_threads_slices(DNXHDEncContext *ctx)
             unsigned mb = mb_y * ctx->m.mb_width + mb_x;
             ctx->slice_size[mb_y] += ctx->mb_bits[mb];
         }
-        ctx->slice_size[mb_y]   = (ctx->slice_size[mb_y] + 31) & ~31;
+        ctx->slice_size[mb_y]   = (ctx->slice_size[mb_y] + 31U) & ~31U;
         ctx->slice_size[mb_y] >>= 3;
         thread_size = ctx->slice_size[mb_y];
         offset += thread_size;
@@ -1219,14 +1221,19 @@ static int dnxhd_encode_fast(AVCodecContext *avctx, DNXHDEncContext *ctx)
             avctx->execute2(avctx, dnxhd_mb_var_thread,
                             NULL, NULL, ctx->m.mb_height);
         radix_sort(ctx->mb_cmp, ctx->mb_cmp_tmp, ctx->m.mb_num);
+retry:
         for (x = 0; x < ctx->m.mb_num && max_bits > ctx->frame_bits; x++) {
             int mb = ctx->mb_cmp[x].mb;
             int rc = (ctx->qscale * ctx->m.mb_num ) + mb;
             max_bits -= ctx->mb_rc[rc].bits -
                         ctx->mb_rc[rc + ctx->m.mb_num].bits;
-            ctx->mb_qscale[mb] = ctx->qscale + 1;
+            if (ctx->mb_qscale[mb] < 255)
+                ctx->mb_qscale[mb]++;
             ctx->mb_bits[mb]   = ctx->mb_rc[rc + ctx->m.mb_num].bits;
         }
+
+        if (max_bits > ctx->frame_bits)
+            goto retry;
     }
     return 0;
 }

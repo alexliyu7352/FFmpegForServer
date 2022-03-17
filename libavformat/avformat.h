@@ -319,7 +319,7 @@
 #include "libavutil/log.h"
 
 #include "avio.h"
-#include "libavformat/version.h"
+#include "libavformat/version_major.h"
 
 struct AVFormatContext;
 struct AVStream;
@@ -463,6 +463,13 @@ typedef struct AVProbeData {
 /// Demuxer will use avio_open, no opened file should be provided by the caller.
 #define AVFMT_NOFILE        0x0001
 #define AVFMT_NEEDNUMBER    0x0002 /**< Needs '%d' in filename. */
+/**
+ * The muxer/demuxer is experimental and should be used with caution.
+ *
+ * - demuxers: will not be selected automatically by probing, must be specified
+ *             explicitly.
+ */
+#define AVFMT_EXPERIMENTAL  0x0004
 #define AVFMT_SHOW_IDS      0x0008 /**< Show format stream IDs numbers. */
 #define AVFMT_GLOBALHEADER  0x0040 /**< Format wants global header. */
 #define AVFMT_NOTIMESTAMPS  0x0080 /**< Format does not need / have any timestamps. */
@@ -871,6 +878,13 @@ typedef struct AVIndexEntry {
  * to chapter markers. Only ever used with AV_DISPOSITION_ATTACHED_PIC.
  */
 #define AV_DISPOSITION_TIMED_THUMBNAILS     (1 << 11)
+
+/**
+ * The stream is intended to be mixed with a spatial audio track. For example,
+ * it could be used for narration or stereo music, and may remain unchanged by
+ * listener head rotation.
+ */
+#define AV_DISPOSITION_NON_DIEGETIC         (1 << 12)
 
 /**
  * The subtitle stream contains captions, providing a transcription and possibly
@@ -1520,12 +1534,13 @@ typedef struct AVFormatContext {
     /**
      * Avoid negative timestamps during muxing.
      * Any value of the AVFMT_AVOID_NEG_TS_* constants.
-     * Note, this only works when using av_interleaved_write_frame. (interleave_packet_per_dts is in use)
+     * Note, this works better when using av_interleaved_write_frame().
      * - muxing: Set by user
      * - demuxing: unused
      */
     int avoid_negative_ts;
 #define AVFMT_AVOID_NEG_TS_AUTO             -1 ///< Enabled when required by target format
+#define AVFMT_AVOID_NEG_TS_DISABLED          0 ///< Do not shift timestamps even when they are negative.
 #define AVFMT_AVOID_NEG_TS_MAKE_NON_NEGATIVE 1 ///< Shift timestamps so they are non negative
 #define AVFMT_AVOID_NEG_TS_MAKE_ZERO         2 ///< Shift timestamps so that they start at 0
 

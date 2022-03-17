@@ -233,13 +233,14 @@ static av_cold int ape_decode_close(AVCodecContext *avctx)
 static av_cold int ape_decode_init(AVCodecContext *avctx)
 {
     APEContext *s = avctx->priv_data;
+    int channels = avctx->ch_layout.nb_channels;
     int i;
 
     if (avctx->extradata_size != 6) {
         av_log(avctx, AV_LOG_ERROR, "Incorrect extradata\n");
         return AVERROR(EINVAL);
     }
-    if (avctx->channels > 2) {
+    if (channels > 2) {
         av_log(avctx, AV_LOG_ERROR, "Only mono and stereo is supported\n");
         return AVERROR(EINVAL);
     }
@@ -261,7 +262,7 @@ static av_cold int ape_decode_init(AVCodecContext *avctx)
         return AVERROR_PATCHWELCOME;
     }
     s->avctx             = avctx;
-    s->channels          = avctx->channels;
+    s->channels          = channels;
     s->fileversion       = AV_RL16(avctx->extradata);
     s->compression_level = AV_RL16(avctx->extradata + 2);
     s->flags             = AV_RL16(avctx->extradata + 4);
@@ -313,7 +314,9 @@ static av_cold int ape_decode_init(AVCodecContext *avctx)
 
     ff_bswapdsp_init(&s->bdsp);
     ff_llauddsp_init(&s->adsp);
-    avctx->channel_layout = (avctx->channels==2) ? AV_CH_LAYOUT_STEREO : AV_CH_LAYOUT_MONO;
+    av_channel_layout_uninit(&avctx->ch_layout);
+    avctx->ch_layout = (channels == 2) ? (AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO
+                                       : (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
 
     return 0;
 }
@@ -1088,13 +1091,13 @@ static av_always_inline int predictor_update_3930(APEPredictor *p,
                                                   const int delayA)
 {
     int32_t predictionA, sign;
-    int32_t d0, d1, d2, d3;
+    uint32_t d0, d1, d2, d3;
 
     p->buf[delayA]     = p->lastA[filter];
     d0 = p->buf[delayA    ];
-    d1 = p->buf[delayA    ] - p->buf[delayA - 1];
-    d2 = p->buf[delayA - 1] - p->buf[delayA - 2];
-    d3 = p->buf[delayA - 2] - p->buf[delayA - 3];
+    d1 = p->buf[delayA    ] - (unsigned)p->buf[delayA - 1];
+    d2 = p->buf[delayA - 1] - (unsigned)p->buf[delayA - 2];
+    d3 = p->buf[delayA - 2] - (unsigned)p->buf[delayA - 3];
 
     predictionA = d0 * p->coeffsA[filter][0] +
                   d1 * p->coeffsA[filter][1] +
@@ -1105,10 +1108,10 @@ static av_always_inline int predictor_update_3930(APEPredictor *p,
     p->filterA[filter] = p->lastA[filter] + ((int)(p->filterA[filter] * 31U) >> 5);
 
     sign = APESIGN(decoded);
-    p->coeffsA[filter][0] += ((d0 < 0) * 2 - 1) * sign;
-    p->coeffsA[filter][1] += ((d1 < 0) * 2 - 1) * sign;
-    p->coeffsA[filter][2] += ((d2 < 0) * 2 - 1) * sign;
-    p->coeffsA[filter][3] += ((d3 < 0) * 2 - 1) * sign;
+    p->coeffsA[filter][0] += (((int32_t)d0 < 0) * 2 - 1) * sign;
+    p->coeffsA[filter][1] += (((int32_t)d1 < 0) * 2 - 1) * sign;
+    p->coeffsA[filter][2] += (((int32_t)d2 < 0) * 2 - 1) * sign;
+    p->coeffsA[filter][3] += (((int32_t)d3 < 0) * 2 - 1) * sign;
 
     return p->filterA[filter];
 }
@@ -1666,7 +1669,7 @@ const AVCodec ff_ape_decoder = {
     .decode         = ape_decode_frame,
     .capabilities   = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DELAY |
                       AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
     .flush          = ape_flush,
     .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_U8P,
                                                       AV_SAMPLE_FMT_S16P,

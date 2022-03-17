@@ -27,12 +27,13 @@
 
 #define UNCHECKED_BITSTREAM_READER 1
 
-#include "libavutil/video_enc_params.h"
+#include "config_components.h"
 
 #include "avcodec.h"
 #include "error_resilience.h"
-#include "flv.h"
+#include "flvdec.h"
 #include "h263.h"
+#include "h263dec.h"
 #if FF_API_FLAG_TRUNCATED
 #include "h263_parser.h"
 #endif
@@ -40,15 +41,17 @@
 #include "internal.h"
 #include "mpeg_er.h"
 #include "mpeg4video.h"
+#include "mpeg4videodec.h"
 #if FF_API_FLAG_TRUNCATED
 #include "mpeg4video_parser.h"
 #endif
 #include "mpegutils.h"
 #include "mpegvideo.h"
-#include "msmpeg4.h"
+#include "mpegvideodec.h"
+#include "msmpeg4dec.h"
 #include "qpeldsp.h"
 #include "thread.h"
-#include "wmv2.h"
+#include "wmv2dec.h"
 
 static enum AVPixelFormat h263_get_format(AVCodecContext *avctx)
 {
@@ -83,13 +86,11 @@ av_cold int ff_h263_decode_init(AVCodecContext *avctx)
     s->quant_precision = 5;
     s->decode_mb       = ff_h263_decode_mb;
     s->low_delay       = 1;
-    s->unrestricted_mv = 1;
 
     /* select sub codec */
     switch (avctx->codec->id) {
     case AV_CODEC_ID_H263:
     case AV_CODEC_ID_H263P:
-        s->unrestricted_mv = 0;
         avctx->chroma_sample_location = AVCHROMA_LOC_CENTER;
         break;
     case AV_CODEC_ID_MPEG4:
@@ -507,9 +508,9 @@ retry:
             GetBitContext gb;
 
             if (init_get_bits8(&gb, s->avctx->extradata, s->avctx->extradata_size) >= 0 )
-                ff_mpeg4_decode_picture_header(avctx->priv_data, &gb, 1);
+                ff_mpeg4_decode_picture_header(avctx->priv_data, &gb, 1, 0);
         }
-        ret = ff_mpeg4_decode_picture_header(avctx->priv_data, &s->gb, 0);
+        ret = ff_mpeg4_decode_picture_header(avctx->priv_data, &s->gb, 0, 0);
     } else if (CONFIG_H263I_DECODER && s->codec_id == AV_CODEC_ID_H263I) {
         ret = ff_intel_h263_decode_picture_header(s);
     } else if (CONFIG_FLV_DECODER && s->h263_flv) {
@@ -602,13 +603,6 @@ retry:
          s->pict_type != AV_PICTURE_TYPE_I)    ||
         avctx->skip_frame >= AVDISCARD_ALL)
         return get_consumed_bytes(s, buf_size);
-
-    if (s->next_p_frame_damaged) {
-        if (s->pict_type == AV_PICTURE_TYPE_B)
-            return get_consumed_bytes(s, buf_size);
-        else
-            s->next_p_frame_damaged = 0;
-    }
 
     if ((!s->no_rounding) || s->pict_type == AV_PICTURE_TYPE_B) {
         s->me.qpel_put = s->qdsp.put_qpel_pixels_tab;
@@ -711,17 +705,11 @@ frame_end:
     if (s->last_picture_ptr || s->low_delay) {
         if (   pict->format == AV_PIX_FMT_YUV420P
             && (s->codec_tag == AV_RL32("GEOV") || s->codec_tag == AV_RL32("GEOX"))) {
-            int x, y, p;
-            av_frame_make_writable(pict);
-            for (p=0; p<3; p++) {
-                int w = AV_CEIL_RSHIFT(pict-> width, !!p);
+            for (int p = 0; p < 3; p++) {
                 int h = AV_CEIL_RSHIFT(pict->height, !!p);
-                int linesize = pict->linesize[p];
-                for (y=0; y<(h>>1); y++)
-                    for (x=0; x<w; x++)
-                        FFSWAP(int,
-                               pict->data[p][x + y*linesize],
-                               pict->data[p][x + (h-1-y)*linesize]);
+
+                pict->data[p]     += (h - 1) * pict->linesize[p];
+                pict->linesize[p] *= -1;
             }
         }
         *got_frame = 1;
@@ -780,7 +768,8 @@ const AVCodec ff_h263_decoder = {
                       AV_CODEC_CAP_TRUNCATED |
 #endif
                       AV_CODEC_CAP_DELAY,
-    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE |
+                      FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush          = ff_mpeg_flush,
     .max_lowres     = 3,
     .pix_fmts       = ff_h263_hwaccel_pixfmt_list_420,
@@ -801,7 +790,8 @@ const AVCodec ff_h263p_decoder = {
                       AV_CODEC_CAP_TRUNCATED |
 #endif
                       AV_CODEC_CAP_DELAY,
-    .caps_internal  = FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE |
+                      FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush          = ff_mpeg_flush,
     .max_lowres     = 3,
     .pix_fmts       = ff_h263_hwaccel_pixfmt_list_420,

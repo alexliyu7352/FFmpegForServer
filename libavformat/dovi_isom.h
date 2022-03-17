@@ -1,5 +1,6 @@
 /*
- * XVideo Motion Compensation internal functions
+ * DOVI ISO Media common code
+ * Copyright (c) 2021 quietvoid
  *
  * This file is part of FFmpeg.
  *
@@ -18,14 +19,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_XVMC_INTERNAL_H
-#define AVCODEC_XVMC_INTERNAL_H
+#ifndef AVFORMAT_DOVI_ISOM_H
+#define AVFORMAT_DOVI_ISOM_H
 
-#include "avcodec.h"
-#include "mpegvideo.h"
-#include "version.h"
+#include "libavutil/dovi_meta.h"
 
-void ff_xvmc_init_block(MpegEncContext *s);
-void ff_xvmc_pack_pblocks(MpegEncContext *s, int cbp);
+#include "avformat.h"
 
-#endif /* AVCODEC_XVMC_INTERNAL_H */
+#define ISOM_DVCC_DVVC_SIZE 24
+
+int ff_isom_parse_dvcc_dvvc(AVFormatContext *s, AVStream *st, const uint8_t *buf_ptr, uint64_t size);
+void ff_isom_put_dvcc_dvvc(AVFormatContext *s, uint8_t out[ISOM_DVCC_DVVC_SIZE],
+                           AVDOVIDecoderConfigurationRecord *dovi);
+
+#endif /* AVFORMAT_DOVI_ISOM_H */
