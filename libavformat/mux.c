@@ -559,23 +559,23 @@ static int compute_muxer_pkt_fields(AVFormatContext *s, AVStream *st, AVPacket *
         pkt->dts = sti->pts_buffer[0];
     }
 
-    if (sti->cur_dts && sti->cur_dts != AV_NOPTS_VALUE &&
-        ((!(s->oformat->flags & AVFMT_TS_NONSTRICT) &&
-          st->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE &&
-          st->codecpar->codec_type != AVMEDIA_TYPE_DATA &&
-          sti->cur_dts >= pkt->dts) || sti->cur_dts > pkt->dts)) {
-        av_log(s, AV_LOG_ERROR,
-               "Application provided invalid, non monotonically increasing dts to muxer in stream %d: %s >= %s\n",
-               st->index, av_ts2str(sti->cur_dts), av_ts2str(pkt->dts));
-        return AVERROR(EINVAL);
-    }
-    if (pkt->dts != AV_NOPTS_VALUE && pkt->pts != AV_NOPTS_VALUE && pkt->pts < pkt->dts) {
-        av_log(s, AV_LOG_ERROR,
-               "pts (%s) < dts (%s) in stream %d\n",
-               av_ts2str(pkt->pts), av_ts2str(pkt->dts),
-               st->index);
-        return AVERROR(EINVAL);
-    }
+//    if (sti->cur_dts && sti->cur_dts != AV_NOPTS_VALUE &&
+//        ((!(s->oformat->flags & AVFMT_TS_NONSTRICT) &&
+//          st->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE &&
+//          st->codecpar->codec_type != AVMEDIA_TYPE_DATA &&
+//          sti->cur_dts >= pkt->dts) || sti->cur_dts > pkt->dts)) {
+//        av_log(s, AV_LOG_ERROR,
+//               "Application provided invalid, non monotonically increasing dts to muxer in stream %d: %s >= %s\n",
+//               st->index, av_ts2str(sti->cur_dts), av_ts2str(pkt->dts));
+//        return AVERROR(EINVAL);
+//    }
+//    if (pkt->dts != AV_NOPTS_VALUE && pkt->pts != AV_NOPTS_VALUE && pkt->pts < pkt->dts) {
+//        av_log(s, AV_LOG_ERROR,
+//               "pts (%s) < dts (%s) in stream %d\n",
+//               av_ts2str(pkt->pts), av_ts2str(pkt->dts),
+//               st->index);
+//        return AVERROR(EINVAL);
+//    }
 
     if (s->debug & FF_FDEBUG_TS)
         av_log(s, AV_LOG_DEBUG, "av_write_frame: pts2:%s dts2:%s\n",
@@ -697,7 +697,6 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
                 );
             }
         } else {
-            av_assert2(pkt->dts == AV_NOPTS_VALUE || pkt->dts >= 0 || s->max_interleave_delta > 0);
             if (pkt->dts != AV_NOPTS_VALUE && pkt->dts < 0) {
                 av_log(s, AV_LOG_WARNING,
                     "Packets poorly interleaved, failed to avoid negative "

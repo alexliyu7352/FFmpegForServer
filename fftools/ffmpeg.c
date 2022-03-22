@@ -806,7 +806,7 @@ static void write_packet(OutputFile *of, AVPacket *pkt, OutputStream *ost, int u
 
     av_packet_rescale_ts(pkt, ost->mux_timebase, ost->st->time_base);
 
-    if (!(s->oformat->flags & AVFMT_NOTIMESTAMPS)) {
+    if (fix_dts &&!(s->oformat->flags & AVFMT_NOTIMESTAMPS)) {
         if (pkt->dts != AV_NOPTS_VALUE &&
             pkt->pts != AV_NOPTS_VALUE &&
             pkt->dts > pkt->pts) {

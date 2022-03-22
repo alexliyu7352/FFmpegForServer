@@ -82,6 +82,17 @@ typedef struct FFFormatContext {
     int nb_interleaved_streams;
 
     /**
+     * Whether the timestamp shift offset has already been determined.
+     * -1: disabled, 0: not yet determined, 1: determined.
+     */
+    enum {
+        AVOID_NEGATIVE_TS_DISABLED = -1,
+        AVOID_NEGATIVE_TS_UNKNOWN  = 0,
+        AVOID_NEGATIVE_TS_KNOWN    = 1,
+    } avoid_negative_ts_status;
+#define AVOID_NEGATIVE_TS_ENABLED(status) ((status) >= 0)
+
+    /**
      * The interleavement function in use. Always set for muxers.
      */
     int (*interleave_packet)(struct AVFormatContext *s, AVPacket *pkt,
