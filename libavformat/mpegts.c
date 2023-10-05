@@ -32,13 +32,16 @@
 #include "libavutil/opt.h"
 #include "libavutil/avassert.h"
 #include "libavutil/dovi_meta.h"
+#include "libavcodec/avcodec.h"
 #include "libavcodec/bytestream.h"
+#include "libavcodec/defs.h"
 #include "libavcodec/get_bits.h"
 #include "libavcodec/opus.h"
 #include "avformat.h"
 #include "mpegts.h"
 #include "internal.h"
 #include "avio_internal.h"
+#include "demux.h"
 #include "mpeg.h"
 #include "isom.h"
 #if CONFIG_ICONV
@@ -645,6 +648,7 @@ typedef struct SectionHeader {
     uint8_t tid;
     uint16_t id;
     uint8_t version;
+    uint8_t current_next;
     uint8_t sec_num;
     uint8_t last_sec_num;
 } SectionHeader;
@@ -773,6 +777,7 @@ static int parse_section_header(SectionHeader *h,
     if (val < 0)
         return val;
     h->version = (val >> 1) & 0x1f;
+    h->current_next = val & 0x01;
     val = get8(pp, p_end);
     if (val < 0)
         return val;
@@ -855,6 +860,7 @@ static const StreamType HLS_SAMPLE_ENC_types[] = {
 static const StreamType REGD_types[] = {
     { MKTAG('d', 'r', 'a', 'c'), AVMEDIA_TYPE_VIDEO, AV_CODEC_ID_DIRAC },
     { MKTAG('A', 'C', '-', '3'), AVMEDIA_TYPE_AUDIO, AV_CODEC_ID_AC3   },
+    { MKTAG('A', 'C', '-', '4'), AVMEDIA_TYPE_AUDIO, AV_CODEC_ID_AC4   },
     { MKTAG('B', 'S', 'S', 'D'), AVMEDIA_TYPE_AUDIO, AV_CODEC_ID_S302M },
     { MKTAG('D', 'T', 'S', '1'), AVMEDIA_TYPE_AUDIO, AV_CODEC_ID_DTS   },
     { MKTAG('D', 'T', 'S', '2'), AVMEDIA_TYPE_AUDIO, AV_CODEC_ID_DTS   },
@@ -862,6 +868,7 @@ static const StreamType REGD_types[] = {
     { MKTAG('E', 'A', 'C', '3'), AVMEDIA_TYPE_AUDIO, AV_CODEC_ID_EAC3  },
     { MKTAG('H', 'E', 'V', 'C'), AVMEDIA_TYPE_VIDEO, AV_CODEC_ID_HEVC  },
     { MKTAG('K', 'L', 'V', 'A'), AVMEDIA_TYPE_DATA,  AV_CODEC_ID_SMPTE_KLV },
+    { MKTAG('V', 'A', 'N', 'C'), AVMEDIA_TYPE_DATA,  AV_CODEC_ID_SMPTE_2038 },
     { MKTAG('I', 'D', '3', ' '), AVMEDIA_TYPE_DATA,  AV_CODEC_ID_TIMED_ID3 },
     { MKTAG('V', 'C', '-', '1'), AVMEDIA_TYPE_VIDEO, AV_CODEC_ID_VC1   },
     { MKTAG('O', 'p', 'u', 's'), AVMEDIA_TYPE_AUDIO, AV_CODEC_ID_OPUS  },
@@ -1299,7 +1306,7 @@ skip:
                     p += sl_header_bytes;
                     buf_size -= sl_header_bytes;
                 }
-                if (pes->stream_type == 0x15 && buf_size >= 5) {
+                if (pes->st->codecpar->codec_id == AV_CODEC_ID_SMPTE_KLV && buf_size >= 5) {
                     /* skip metadata access unit header */
                     pes->pes_header_size += 5;
                     p += 5;
@@ -1464,8 +1471,7 @@ static int init_MP4DescrParseContext(MP4DescrParseContext *d, AVFormatContext *s
     if (size > (1 << 30))
         return AVERROR_INVALIDDATA;
 
-    ffio_init_context(&d->pb, (unsigned char *)buf, size,
-                      0, NULL, NULL, NULL, NULL);
+    ffio_init_read_context(&d->pb, buf, size);
 
     d->s               = s;
     d->level           = 0;
@@ -1736,9 +1742,8 @@ static void m4sl_cb(MpegTSFilter *filter, const uint8_t *section,
 
             pes->sl = mp4_descr[i].sl;
 
-            ffio_init_context(&pb, mp4_descr[i].dec_config_descr,
-                              mp4_descr[i].dec_config_descr_len, 0,
-                              NULL, NULL, NULL, NULL);
+            ffio_init_read_context(&pb, mp4_descr[i].dec_config_descr,
+                                   mp4_descr[i].dec_config_descr_len);
             ff_mp4_read_dec_config_descr(s, st, &pb.pub);
             if (st->codecpar->codec_id == AV_CODEC_ID_AAC &&
                 st->codecpar->extradata_size > 0)
@@ -1846,9 +1851,8 @@ int ff_parse_mpeg2_descriptor(AVFormatContext *fc, AVStream *st, int stream_type
             if (mp4_descr[i].dec_config_descr_len &&
                 mp4_descr[i].es_id == desc_es_id) {
                 FFIOContext pb;
-                ffio_init_context(&pb, mp4_descr[i].dec_config_descr,
-                                  mp4_descr[i].dec_config_descr_len, 0,
-                                  NULL, NULL, NULL, NULL);
+                ffio_init_read_context(&pb, mp4_descr[i].dec_config_descr,
+                                       mp4_descr[i].dec_config_descr_len);
                 ff_mp4_read_dec_config_descr(fc, st, &pb.pub);
                 if (st->codecpar->codec_id == AV_CODEC_ID_AAC &&
                     st->codecpar->extradata_size > 0) {
@@ -1868,9 +1872,8 @@ int ff_parse_mpeg2_descriptor(AVFormatContext *fc, AVStream *st, int stream_type
              sti->request_probe > 0) &&
             mp4_descr->dec_config_descr_len && mp4_descr->es_id == pid) {
             FFIOContext pb;
-            ffio_init_context(&pb, mp4_descr->dec_config_descr,
-                              mp4_descr->dec_config_descr_len, 0,
-                              NULL, NULL, NULL, NULL);
+            ffio_init_read_context(&pb, mp4_descr->dec_config_descr,
+                                   mp4_descr->dec_config_descr_len);
             ff_mp4_read_dec_config_descr(fc, st, &pb.pub);
             if (st->codecpar->codec_id == AV_CODEC_ID_AAC &&
                 st->codecpar->extradata_size > 0) {
@@ -2141,7 +2144,7 @@ int ff_parse_mpeg2_descriptor(AVFormatContext *fc, AVStream *st, int stream_type
             // Component tag limits are documented in TR-B14, fascicle 2,
             // Vol. 3, Section 2, 4.2.8.1
             int actual_component_tag = sti->stream_identifier - 1;
-            int picked_profile = FF_PROFILE_UNKNOWN;
+            int picked_profile = AV_PROFILE_UNKNOWN;
             int data_component_id = get16(pp, desc_end);
             if (data_component_id < 0)
                 return AVERROR_INVALIDDATA;
@@ -2152,27 +2155,31 @@ int ff_parse_mpeg2_descriptor(AVFormatContext *fc, AVStream *st, int stream_type
                 // non-mobile captioning service ("profile A").
                 if (actual_component_tag >= 0x30 &&
                     actual_component_tag <= 0x37) {
-                    picked_profile = FF_PROFILE_ARIB_PROFILE_A;
+                    picked_profile = AV_PROFILE_ARIB_PROFILE_A;
                 }
                 break;
             case 0x0012:
                 // component tag 0x87 signifies a mobile/partial reception
                 // (1seg) captioning service ("profile C").
                 if (actual_component_tag == 0x87) {
-                    picked_profile = FF_PROFILE_ARIB_PROFILE_C;
+                    picked_profile = AV_PROFILE_ARIB_PROFILE_C;
                 }
                 break;
             default:
                 break;
             }
 
-            if (picked_profile == FF_PROFILE_UNKNOWN)
+            if (picked_profile == AV_PROFILE_UNKNOWN)
                 break;
 
             st->codecpar->codec_type = AVMEDIA_TYPE_SUBTITLE;
             st->codecpar->codec_id   = AV_CODEC_ID_ARIB_CAPTION;
-            st->codecpar->profile    = picked_profile;
+            if (st->codecpar->profile != picked_profile) {
+                st->codecpar->profile = picked_profile;
+                sti->need_context_update = 1;
+            }
             sti->request_probe = 0;
+            sti->need_parsing = 0;
         }
         break;
     case 0xb0: /* DOVI video stream descriptor */
@@ -2331,6 +2338,8 @@ static void pmt_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
     if (parse_section_header(h, &p, p_end) < 0)
         return;
     if (h->tid != PMT_TID)
+        return;
+    if (!h->current_next)
         return;
     if (skip_identical(h, tssf))
         return;
@@ -2541,6 +2550,8 @@ static void pat_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
         return;
     if (h->tid != PAT_TID)
         return;
+    if (!h->current_next)
+        return;
     if (ts->skip_changes)
         return;
 
@@ -2679,6 +2690,8 @@ static void sdt_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
         return;
     if (h->tid != SDT_TID)
         return;
+    if (!h->current_next)
+        return;
     if (ts->skip_changes)
         return;
     if (skip_identical(h, tssf))
@@ -2718,13 +2731,13 @@ static void sdt_cb(MpegTSFilter *filter, const uint8_t *section, int section_len
 
             switch (desc_tag) {
             case 0x48:
-                service_type = get8(&p, p_end);
+                service_type = get8(&p, desc_end);
                 if (service_type < 0)
                     break;
-                provider_name = getstr8(&p, p_end);
+                provider_name = getstr8(&p, desc_end);
                 if (!provider_name)
                     break;
-                name = getstr8(&p, p_end);
+                name = getstr8(&p, desc_end);
                 if (name) {
                     AVProgram *program = av_new_program(ts->stream, sid);
                     if (program) {
@@ -2861,16 +2874,8 @@ static int handle_packet(MpegTSContext *ts, const uint8_t *packet, int64_t pos)
                     break;
             }
             if (i == ts->nb_prg && ts->nb_prg > 0) {
-                int types = 0;
-                for (i = 0; i < ts->stream->nb_streams; i++) {
-                    AVStream *st = ts->stream->streams[i];
-                    if (st->codecpar->codec_type >= 0)
-                        types |= 1<<st->codecpar->codec_type;
-                }
-                if ((types & (1<<AVMEDIA_TYPE_AUDIO) && types & (1<<AVMEDIA_TYPE_VIDEO)) || pos > 100000) {
-                    av_log(ts->stream, AV_LOG_DEBUG, "All programs have pmt, headers found\n");
-                    ts->stream->ctx_flags &= ~AVFMTCTX_NOHEADER;
-                }
+                av_log(ts->stream, AV_LOG_DEBUG, "All programs have pmt, headers found\n");
+                ts->stream->ctx_flags &= ~AVFMTCTX_NOHEADER;
             }
         }
 

@@ -109,16 +109,16 @@ static VLC vlc_tab_type30;
 static VLC vlc_tab_type34;
 static VLC vlc_tab_fft_tone_offset[5];
 
-static VLC_TYPE qdm2_table[3838][2];
+static VLCElem qdm2_table[3838];
 
 static av_cold void build_vlc(VLC *vlc, int nb_bits, int nb_codes,
                               unsigned *offset, const uint8_t tab[][2])
 {
     vlc->table           = &qdm2_table[*offset];
     vlc->table_allocated = FF_ARRAY_ELEMS(qdm2_table) - *offset;
-    ff_init_vlc_from_lengths(vlc, nb_bits, nb_codes,
+    ff_vlc_init_from_lengths(vlc, nb_bits, nb_codes,
                              &tab[0][1], 2, &tab[0][0], 2, 1,
-                             -1, INIT_VLC_STATIC_OVERLONG | INIT_VLC_LE, NULL);
+                             -1, VLC_INIT_STATIC_OVERLONG | VLC_INIT_LE, NULL);
     *offset += vlc->table_size;
 }
 

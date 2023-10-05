@@ -24,12 +24,14 @@
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
 #include "libavutil/thread.h"
+#include "codec_internal.h"
 #include "mpegutils.h"
 #include "mpegvideo.h"
 #include "h263.h"
 #include "h263enc.h"
 #include "mpeg4video.h"
 #include "mpeg4videodata.h"
+#include "mpeg4videodefs.h"
 #include "mpeg4videoenc.h"
 #include "mpegvideoenc.h"
 #include "profiles.h"
@@ -173,7 +175,7 @@ static inline int decide_ac_pred(MpegEncContext *s, int16_t block[6][64],
                     ac_val1[i + 8] = level;
                 }
             }
-            st[n] = s->intra_h_scantable.permutated;
+            st[n] = s->permutated_intra_h_scantable;
         } else {
             const int xy = s->mb_x - 1 + s->mb_y * s->mb_stride;
             /* left prediction */
@@ -195,7 +197,7 @@ static inline int decide_ac_pred(MpegEncContext *s, int16_t block[6][64],
                     ac_val1[i + 8] = block[n][s->idsp.idct_permutation[i]];
                 }
             }
-            st[n] = s->intra_v_scantable.permutated;
+            st[n] = s->permutated_intra_v_scantable;
         }
 
         for (i = 63; i > 0; i--)  // FIXME optimize
@@ -638,17 +640,17 @@ void ff_mpeg4_encode_mb(MpegEncContext *s, int16_t block[6][64],
                 if (s->max_b_frames > 0) {
                     int i;
                     int x, y, offset;
-                    uint8_t *p_pic;
+                    const uint8_t *p_pic;
 
                     x = s->mb_x * 16;
                     y = s->mb_y * 16;
 
                     offset = x + y * s->linesize;
-                    p_pic  = s->new_picture.f->data[0] + offset;
+                    p_pic  = s->new_picture->data[0] + offset;
 
                     s->mb_skipped = 1;
                     for (i = 0; i < s->max_b_frames; i++) {
-                        uint8_t *b_pic;
+                        const uint8_t *b_pic;
                         int diff;
                         Picture *pic = s->reordered_input_picture[i + 1];
 
@@ -914,7 +916,7 @@ static void mpeg4_encode_visual_object_header(MpegEncContext *s)
     int profile_and_level_indication;
     int vo_ver_id;
 
-    if (s->avctx->profile != FF_PROFILE_UNKNOWN) {
+    if (s->avctx->profile != AV_PROFILE_UNKNOWN) {
         profile_and_level_indication = s->avctx->profile << 4;
     } else if (s->max_b_frames || s->quarter_sample) {
         profile_and_level_indication = 0xF0;  // adv simple
@@ -922,7 +924,7 @@ static void mpeg4_encode_visual_object_header(MpegEncContext *s)
         profile_and_level_indication = 0x00;  // simple
     }
 
-    if (s->avctx->level != FF_LEVEL_UNKNOWN)
+    if (s->avctx->level != AV_LEVEL_UNKNOWN)
         profile_and_level_indication |= s->avctx->level;
     else
         profile_and_level_indication |= 1;   // level 1
@@ -1054,16 +1056,16 @@ static void mpeg4_encode_vol_header(MpegEncContext *s,
 }
 
 /* write MPEG-4 VOP header */
-int ff_mpeg4_encode_picture_header(MpegEncContext *s, int picture_number)
+int ff_mpeg4_encode_picture_header(MpegEncContext *s)
 {
     uint64_t time_incr;
     int64_t time_div, time_mod;
 
     if (s->pict_type == AV_PICTURE_TYPE_I) {
         if (!(s->avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER)) {
-            if (s->strict_std_compliance < FF_COMPLIANCE_VERY_STRICT)  // HACK, the reference sw is buggy
+            if (s->avctx->strict_std_compliance < FF_COMPLIANCE_VERY_STRICT)  // HACK, the reference sw is buggy
                 mpeg4_encode_visual_object_header(s);
-            if (s->strict_std_compliance < FF_COMPLIANCE_VERY_STRICT || picture_number == 0)  // HACK, the reference sw is buggy
+            if (s->avctx->strict_std_compliance < FF_COMPLIANCE_VERY_STRICT || s->picture_number == 0)  // HACK, the reference sw is buggy
                 mpeg4_encode_vol_header(s, 0, 0);
         }
         if (!(s->workaround_bugs & FF_BUG_MS))
@@ -1080,8 +1082,8 @@ int ff_mpeg4_encode_picture_header(MpegEncContext *s, int picture_number)
     time_mod  = FFUMOD(s->time, s->avctx->time_base.den);
     time_incr = time_div - s->last_time_base;
 
-    // This limits the frame duration to max 1 hour
-    if (time_incr > 3600) {
+    // This limits the frame duration to max 1 day
+    if (time_incr > 3600*24) {
         av_log(s->avctx, AV_LOG_ERROR, "time_incr %"PRIu64" too large\n", time_incr);
         return AVERROR(EINVAL);
     }
@@ -1099,7 +1101,7 @@ int ff_mpeg4_encode_picture_header(MpegEncContext *s, int picture_number)
     }
     put_bits(&s->pb, 3, 0);     /* intra dc VLC threshold */
     if (!s->progressive_sequence) {
-        put_bits(&s->pb, 1, s->current_picture_ptr->f->top_field_first);
+        put_bits(&s->pb, 1, !!(s->current_picture_ptr->f->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST));
         put_bits(&s->pb, 1, s->alternate_scan);
     }
     // FIXME sprite stuff
@@ -1285,6 +1287,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
+    ff_qpeldsp_init(&s->qdsp);
     if ((ret = ff_mpv_encode_init(avctx)) < 0)
         return ret;
 
@@ -1378,10 +1381,7 @@ static const AVOption options[] = {
       OFFSET(mpeg_quant), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, 1, VE },
     FF_MPV_COMMON_BFRAME_OPTS
     FF_MPV_COMMON_OPTS
-#if FF_API_MPEGVIDEO_OPTS
-    FF_MPV_DEPRECATED_A53_CC_OPT
-    FF_MPV_DEPRECATED_MATRIX_OPT
-#endif
+    FF_MPV_COMMON_MOTION_EST_OPTS
     FF_MPEG4_PROFILE_OPTS
     { NULL },
 };
@@ -1393,17 +1393,18 @@ static const AVClass mpeg4enc_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVCodec ff_mpeg4_encoder = {
-    .name           = "mpeg4",
-    .long_name      = NULL_IF_CONFIG_SMALL("MPEG-4 part 2"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_MPEG4,
+const FFCodec ff_mpeg4_encoder = {
+    .p.name         = "mpeg4",
+    CODEC_LONG_NAME("MPEG-4 part 2"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_MPEG4,
     .priv_data_size = sizeof(MpegEncContext),
     .init           = encode_init,
-    .encode2        = ff_mpv_encode_picture,
+    FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close          = ff_mpv_encode_end,
-    .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
-    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
-    .priv_class     = &mpeg4enc_class,
+    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
+    .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .p.priv_class   = &mpeg4enc_class,
 };

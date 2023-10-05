@@ -19,6 +19,8 @@ vpath %/fate_config.sh.template $(SRC_PATH)
 TESTTOOLS   = audiogen videogen rotozoom tiny_psnr tiny_ssim base64 audiomatch
 HOSTPROGS  := $(TESTTOOLS:%=tests/%) doc/print_options
 
+ALLFFLIBS = avcodec avdevice avfilter avformat avutil postproc swscale swresample
+
 # $(FFLIBS-yes) needs to be in linking order
 FFLIBS-$(CONFIG_AVDEVICE)   += avdevice
 FFLIBS-$(CONFIG_AVFILTER)   += avfilter
@@ -45,7 +47,7 @@ FF_DEP_LIBS  := $(DEP_LIBS)
 FF_STATIC_DEP_LIBS := $(STATIC_DEP_LIBS)
 
 $(TOOLS): %$(EXESUF): %.o
-	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(EXTRALIBS-$(*F)) $(EXTRALIBS) $(ELIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $(filter-out $(FF_DEP_LIBS), $^) $(EXTRALIBS-$(*F)) $(EXTRALIBS) $(ELIBS)
 
 target_dec_%_fuzzer$(EXESUF): target_dec_%_fuzzer.o $(FF_DEP_LIBS)
 	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $^ $(ELIBS) $(FF_EXTRALIBS) $(LIBFUZZER_PATH)
@@ -65,6 +67,8 @@ tools/target_io_dem_fuzzer$(EXESUF): tools/target_io_dem_fuzzer.o $(FF_DEP_LIBS)
 
 tools/enum_options$(EXESUF): ELIBS = $(FF_EXTRALIBS)
 tools/enum_options$(EXESUF): $(FF_DEP_LIBS)
+tools/enc_recon_frame_test$(EXESUF): $(FF_DEP_LIBS)
+tools/enc_recon_frame_test$(EXESUF): ELIBS = $(FF_EXTRALIBS)
 tools/scale_slice_test$(EXESUF): $(FF_DEP_LIBS)
 tools/scale_slice_test$(EXESUF): ELIBS = $(FF_EXTRALIBS)
 tools/sofa2wavs$(EXESUF): ELIBS = $(FF_EXTRALIBS)
@@ -76,6 +80,7 @@ tools/target_dem_%_fuzzer$(EXESUF): $(FF_DEP_LIBS)
 CONFIGURABLE_COMPONENTS =                                           \
     $(wildcard $(FFLIBS:%=$(SRC_PATH)/lib%/all*.c))                 \
     $(SRC_PATH)/libavcodec/bitstream_filters.c                      \
+    $(SRC_PATH)/libavcodec/hwaccels.h                               \
     $(SRC_PATH)/libavcodec/parsers.c                                \
     $(SRC_PATH)/libavformat/protocols.c                             \
 
@@ -88,7 +93,7 @@ ffbuild/.config: $(CONFIGURABLE_COMPONENTS)
 SUBDIR_VARS := CLEANFILES FFLIBS HOSTPROGS TESTPROGS TOOLS               \
                HEADERS ARCH_HEADERS BUILT_HEADERS SKIPHEADERS            \
                ARMV5TE-OBJS ARMV6-OBJS ARMV8-OBJS VFP-OBJS NEON-OBJS     \
-               ALTIVEC-OBJS VSX-OBJS MMX-OBJS X86ASM-OBJS                \
+               ALTIVEC-OBJS VSX-OBJS RVV-OBJS MMX-OBJS X86ASM-OBJS       \
                MIPSFPU-OBJS MIPSDSPR2-OBJS MIPSDSP-OBJS MSA-OBJS         \
                MMI-OBJS LSX-OBJS LASX-OBJS OBJS SLIBOBJS SHLIBOBJS       \
                STLIBOBJS HOSTOBJS TESTOBJS
@@ -113,12 +118,13 @@ include $(SRC_PATH)/fftools/Makefile
 include $(SRC_PATH)/doc/Makefile
 include $(SRC_PATH)/doc/examples/Makefile
 
-libavcodec/avcodec.o libavformat/utils.o libavdevice/avdevice.o libavfilter/avfilter.o libavutil/utils.o libpostproc/postprocess.o libswresample/swresample.o libswscale/utils.o : libavutil/ffversion.h
+$(ALLFFLIBS:%=lib%/version.o): libavutil/ffversion.h
 
 $(PROGS): %$(PROGSSUF)$(EXESUF): %$(PROGSSUF)_g$(EXESUF)
 ifeq ($(STRIPTYPE),direct)
 	$(STRIP) -o $@ $<
 else
+	$(RM) $@
 	$(CP) $< $@
 	$(STRIP) $@
 endif

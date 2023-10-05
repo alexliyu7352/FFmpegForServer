@@ -57,15 +57,6 @@
 #define MMREG_WIDTH "8"
 #define MM "%%mm"
 #define MOVQ "movq"
-#if COMPILE_TEMPLATE_MMXEXT
-#define SPREADW(a) "pshufw $0, "a", "a" \n\t"
-#define PMAXW(a,b) "pmaxsw "a", "b"     \n\t"
-#define PMAX(a,b) \
-            "pshufw $0x0E, "a", "b"     \n\t"\
-            PMAXW(b, a)\
-            "pshufw $0x01, "a", "b"     \n\t"\
-            PMAXW(b, a)
-#else
 #define SPREADW(a) \
             "punpcklwd "a", "a"         \n\t"\
             "punpcklwd "a", "a"         \n\t"
@@ -80,7 +71,6 @@
             "psrlq $16, "a"             \n\t"\
             PMAXW(b, a)
 
-#endif
 #endif
 
 #if COMPILE_TEMPLATE_SSSE3
@@ -235,7 +225,8 @@ static int RENAME(dct_quantize)(MpegEncContext *s,
     if(s->mb_intra) block[0]= level;
     else            block[0]= temp_block[0];
 
-    if (s->idsp.perm_type == FF_IDCT_PERM_SIMPLE) {
+    av_assert2(ARCH_X86_32 || s->idsp.perm_type != FF_IDCT_PERM_SIMPLE);
+    if (ARCH_X86_32 && s->idsp.perm_type == FF_IDCT_PERM_SIMPLE) {
         if(last_non_zero_p1 <= 1) goto end;
         block[0x08] = temp_block[0x01]; block[0x10] = temp_block[0x08];
         block[0x20] = temp_block[0x10];

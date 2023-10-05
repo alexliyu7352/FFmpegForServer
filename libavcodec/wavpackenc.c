@@ -24,8 +24,8 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/opt.h"
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "put_bits.h"
 #include "bytestream.h"
 #include "wavpackenc.h"
@@ -2592,7 +2592,16 @@ static int wavpack_encode_block(WavPackEncodeContext *s,
         s->avctx->ch_layout.u.mask != AV_CH_LAYOUT_STEREO) {
         put_metadata_block(&pb, WP_ID_CHANINFO, 5);
         bytestream2_put_byte(&pb, s->avctx->ch_layout.nb_channels);
-        bytestream2_put_le32(&pb, s->avctx->ch_layout.u.mask);
+        if (s->avctx->ch_layout.u.mask >> 32)
+            bytestream2_put_le32(&pb, 0);
+        else
+            bytestream2_put_le32(&pb, s->avctx->ch_layout.u.mask);
+        bytestream2_put_byte(&pb, 0);
+    } else if (s->flags & WV_INITIAL_BLOCK &&
+               s->avctx->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC) {
+        put_metadata_block(&pb, WP_ID_CHANINFO, 5);
+        bytestream2_put_byte(&pb, s->avctx->ch_layout.nb_channels);
+        bytestream2_put_le32(&pb, 0);
         bytestream2_put_byte(&pb, 0);
     }
 
@@ -2824,7 +2833,7 @@ static void fill_buffer(WavPackEncodeContext *s,
 
     switch (s->avctx->sample_fmt) {
     case AV_SAMPLE_FMT_U8P:
-        COPY_SAMPLES(int8_t, 0x80, 0);
+        COPY_SAMPLES(uint8_t, 0x80, 0);
         break;
     case AV_SAMPLE_FMT_S16P:
         COPY_SAMPLES(int16_t, 0, 0);
@@ -2904,9 +2913,7 @@ static int wavpack_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     }
     s->sample_index += frame->nb_samples;
 
-    avpkt->pts      = frame->pts;
     avpkt->size     = buf - avpkt->data;
-    avpkt->duration = ff_samples_to_time_base(avctx, frame->nb_samples);
     *got_packet_ptr = 1;
     return 0;
 }
@@ -2960,21 +2967,21 @@ static const AVClass wavpack_encoder_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVCodec ff_wavpack_encoder = {
-    .name           = "wavpack",
-    .long_name      = NULL_IF_CONFIG_SMALL("WavPack"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_WAVPACK,
+const FFCodec ff_wavpack_encoder = {
+    .p.name         = "wavpack",
+    CODEC_LONG_NAME("WavPack"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_WAVPACK,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(WavPackEncodeContext),
-    .priv_class     = &wavpack_encoder_class,
+    .p.priv_class   = &wavpack_encoder_class,
     .init           = wavpack_encode_init,
-    .encode2        = wavpack_encode_frame,
+    FF_CODEC_ENCODE_CB(wavpack_encode_frame),
     .close          = wavpack_encode_close,
-    .capabilities   = AV_CODEC_CAP_SMALL_LAST_FRAME,
-    .sample_fmts    = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_U8P,
+    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_U8P,
                                                      AV_SAMPLE_FMT_S16P,
                                                      AV_SAMPLE_FMT_S32P,
                                                      AV_SAMPLE_FMT_FLTP,
                                                      AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

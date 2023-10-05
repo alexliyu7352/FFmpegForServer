@@ -89,7 +89,8 @@ void av_channel_name_bprint(AVBPrint *bp, enum AVChannel channel_id)
     if (channel_id >= AV_CHAN_AMBISONIC_BASE &&
         channel_id <= AV_CHAN_AMBISONIC_END)
         av_bprintf(bp, "AMBI%d", channel_id - AV_CHAN_AMBISONIC_BASE);
-    else if ((unsigned)channel_id < FF_ARRAY_ELEMS(channel_names))
+    else if ((unsigned)channel_id < FF_ARRAY_ELEMS(channel_names) &&
+             channel_names[channel_id].name)
         av_bprintf(bp, "%s", channel_names[channel_id].name);
     else if (channel_id == AV_CHAN_NONE)
         av_bprintf(bp, "NONE");
@@ -107,7 +108,9 @@ int av_channel_name(char *buf, size_t buf_size, enum AVChannel channel_id)
     av_bprint_init_for_buffer(&bp, buf, buf_size);
     av_channel_name_bprint(&bp, channel_id);
 
-    return bp.len;
+    if (bp.len >= INT_MAX)
+        return AVERROR(ERANGE);
+    return bp.len + 1;
 }
 
 void av_channel_description_bprint(AVBPrint *bp, enum AVChannel channel_id)
@@ -115,8 +118,11 @@ void av_channel_description_bprint(AVBPrint *bp, enum AVChannel channel_id)
     if (channel_id >= AV_CHAN_AMBISONIC_BASE &&
         channel_id <= AV_CHAN_AMBISONIC_END)
         av_bprintf(bp, "ambisonic ACN %d", channel_id - AV_CHAN_AMBISONIC_BASE);
-    else if ((unsigned)channel_id < FF_ARRAY_ELEMS(channel_names))
+    else if ((unsigned)channel_id < FF_ARRAY_ELEMS(channel_names) &&
+             channel_names[channel_id].description)
         av_bprintf(bp, "%s", channel_names[channel_id].description);
+    else if (channel_id == AV_CHAN_NONE)
+        av_bprintf(bp, "none");
     else
         av_bprintf(bp, "user %d", channel_id);
 }
@@ -131,7 +137,9 @@ int av_channel_description(char *buf, size_t buf_size, enum AVChannel channel_id
     av_bprint_init_for_buffer(&bp, buf, buf_size);
     av_channel_description_bprint(&bp, channel_id);
 
-    return bp.len;
+    if (bp.len >= INT_MAX)
+        return AVERROR(ERANGE);
+    return bp.len + 1;
 }
 
 enum AVChannel av_channel_from_string(const char *str)
@@ -192,7 +200,9 @@ static const struct channel_layout_name channel_layout_map[] = {
     { "7.1",            AV_CHANNEL_LAYOUT_7POINT1             },
     { "7.1(wide)",      AV_CHANNEL_LAYOUT_7POINT1_WIDE_BACK   },
     { "7.1(wide-side)", AV_CHANNEL_LAYOUT_7POINT1_WIDE        },
+    { "7.1(top)",       AV_CHANNEL_LAYOUT_7POINT1_TOP_BACK    },
     { "octagonal",      AV_CHANNEL_LAYOUT_OCTAGONAL           },
+    { "cube",           AV_CHANNEL_LAYOUT_CUBE                },
     { "hexadecagonal",  AV_CHANNEL_LAYOUT_HEXADECAGONAL       },
     { "downmix",        AV_CHANNEL_LAYOUT_STEREO_DOWNMIX,     },
     { "22.2",           AV_CHANNEL_LAYOUT_22POINT2,           },
@@ -783,7 +793,9 @@ int av_channel_layout_describe(const AVChannelLayout *channel_layout,
     if (ret < 0)
         return ret;
 
-    return bp.len;
+    if (bp.len >= INT_MAX)
+        return AVERROR(ERANGE);
+    return bp.len + 1;
 }
 
 enum AVChannel
@@ -985,12 +997,16 @@ uint64_t av_channel_layout_subset(const AVChannelLayout *channel_layout,
     uint64_t ret = 0;
     int i;
 
-    if (channel_layout->order == AV_CHANNEL_ORDER_NATIVE)
+    switch (channel_layout->order) {
+    case AV_CHANNEL_ORDER_NATIVE:
+    case AV_CHANNEL_ORDER_AMBISONIC:
         return channel_layout->u.mask & mask;
-
-    for (i = 0; i < 64; i++)
-        if (mask & (1ULL << i) && av_channel_layout_index_from_channel(channel_layout, i) >= 0)
-            ret |= (1ULL << i);
+    case AV_CHANNEL_ORDER_CUSTOM:
+        for (i = 0; i < 64; i++)
+            if (mask & (1ULL << i) && av_channel_layout_index_from_channel(channel_layout, i) >= 0)
+                ret |= (1ULL << i);
+        break;
+    }
 
     return ret;
 }

@@ -24,6 +24,7 @@
 
 #include "avformat.h"
 #include "internal.h"
+#include "mux.h"
 #include "rawenc.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/internal.h"
@@ -140,7 +141,7 @@ static int apm_read_header(AVFormatContext *s)
     if (par->bits_per_coded_sample != 4)
         return AVERROR_INVALIDDATA;
 
-    if (channels > 2)
+    if (channels > 2 || channels == 0)
         return AVERROR_INVALIDDATA;
 
     av_channel_layout_default(&par->ch_layout, channels);
@@ -148,7 +149,7 @@ static int apm_read_header(AVFormatContext *s)
     par->codec_id              = AV_CODEC_ID_ADPCM_IMA_APM;
     par->format                = AV_SAMPLE_FMT_S16;
     par->bit_rate              = par->ch_layout.nb_channels *
-                                 par->sample_rate *
+                                 (int64_t)par->sample_rate *
                                  par->bits_per_coded_sample;
 
     if ((ret = avio_read(s->pb, buf, APM_FILE_EXTRADATA_SIZE)) < 0)
@@ -303,12 +304,12 @@ static int apm_write_trailer(AVFormatContext *s)
     return 0;
 }
 
-const AVOutputFormat ff_apm_muxer = {
-    .name           = "apm",
-    .long_name      = NULL_IF_CONFIG_SMALL("Ubisoft Rayman 2 APM"),
-    .extensions     = "apm",
-    .audio_codec    = AV_CODEC_ID_ADPCM_IMA_APM,
-    .video_codec    = AV_CODEC_ID_NONE,
+const FFOutputFormat ff_apm_muxer = {
+    .p.name         = "apm",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Ubisoft Rayman 2 APM"),
+    .p.extensions   = "apm",
+    .p.audio_codec  = AV_CODEC_ID_ADPCM_IMA_APM,
+    .p.video_codec  = AV_CODEC_ID_NONE,
     .init           = apm_write_init,
     .write_header   = apm_write_header,
     .write_packet   = ff_raw_write_packet,

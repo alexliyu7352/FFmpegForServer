@@ -32,6 +32,7 @@
 #include "libavutil/dict.h"
 #include "libavutil/opt.h"
 #include "libavutil/time.h"
+#include "libavcodec/codec_desc.h"
 #include "avformat.h"
 #include "avio_internal.h"
 
@@ -77,7 +78,7 @@
 #define COMMON_OPTS() \
     { "reorder_queue_size", "set number of packets to buffer for handling of reordered packets", OFFSET(reordering_queue_size), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, DEC }, \
     { "buffer_size",        "Underlying protocol send/receive buffer size",                  OFFSET(buffer_size),           AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, DEC|ENC }, \
-    { "pkt_size",           "Underlying protocol send packet size",                          OFFSET(pkt_size),              AV_OPT_TYPE_INT, { .i64 = -1 }, -1, INT_MAX, ENC } \
+    { "pkt_size",           "Underlying protocol send packet size",                          OFFSET(pkt_size),              AV_OPT_TYPE_INT, { .i64 = 1472 }, -1, INT_MAX, ENC } \
 
 
 const AVOption ff_rtsp_options[] = {
@@ -843,7 +844,7 @@ int ff_rtsp_open_transport_ctx(AVFormatContext *s, RTSPStream *rtsp_st)
     if (CONFIG_RTSP_MUXER && s->oformat && st) {
         int ret = ff_rtp_chain_mux_open((AVFormatContext **)&rtsp_st->transport_priv,
                                         s, st, rtsp_st->rtp_handle,
-                                        RTSP_TCP_MAX_PACKET_SIZE,
+                                        rt->pkt_size,
                                         rtsp_st->stream_index);
         /* Ownership of rtp_handle is passed to the rtp mux context */
         rtsp_st->rtp_handle = NULL;
@@ -949,6 +950,8 @@ static void rtsp_parse_transport(AVFormatContext *s,
                              ";,", &p);
             }
             th->transport = RTSP_TRANSPORT_RAW;
+        } else {
+            break;
         }
         if (!av_strcasecmp(lower_transport, "TCP"))
             th->lower_transport = RTSP_LOWER_TRANSPORT_TCP;
@@ -2607,7 +2610,7 @@ static int rtp_read_header(AVFormatContext *s)
         goto fail_nobuf;
     avcodec_parameters_free(&par);
 
-    ffio_init_context(&pb, sdp.str, sdp.len, 0, NULL, NULL, NULL, NULL);
+    ffio_init_read_context(&pb, sdp.str, sdp.len);
     s->pb = &pb.pub;
 
     /* if sdp_read_header() fails then following ff_network_close() cancels out */

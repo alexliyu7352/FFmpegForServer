@@ -29,15 +29,14 @@
 #include "libavutil/internal.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/thread.h"
-#include "libavutil/video_enc_params.h"
 
 #include "avcodec.h"
+#include "decode.h"
 #include "error_resilience.h"
 #include "mpegutils.h"
 #include "mpegvideo.h"
 #include "mpegvideodec.h"
 #include "golomb.h"
-#include "internal.h"
 #include "mathops.h"
 #include "mpeg_er.h"
 #include "qpeldsp.h"
@@ -81,7 +80,7 @@ static int rv34_decode_mv(RV34DecContext *r, int block_type);
  * @{
  */
 
-static VLC_TYPE table_data[117592][2];
+static VLCElem table_data[117592];
 
 /**
  * Generate VLC from codeword lengths.
@@ -114,10 +113,10 @@ static void rv34_gen_vlc(const uint8_t *bits, int size, VLC *vlc, const uint8_t 
 
     vlc->table           = &table_data[*offset];
     vlc->table_allocated = FF_ARRAY_ELEMS(table_data) - *offset;
-    ff_init_vlc_sparse(vlc, FFMIN(maxbits, 9), size,
+    ff_vlc_init_sparse(vlc, FFMIN(maxbits, 9), size,
                        bits, 1, 1,
                        cw,    2, 2,
-                       syms, !!syms, !!syms, INIT_VLC_STATIC_OVERLONG);
+                       syms, !!syms, !!syms, VLC_INIT_STATIC_OVERLONG);
     *offset += vlc->table_size;
 }
 
@@ -703,7 +702,7 @@ static inline void rv34_mc(RV34DecContext *r, const int block_type,
     if (HAVE_THREADS && (s->avctx->active_thread_type & FF_THREAD_FRAME)) {
         /* wait for the referenced mb row to be finished */
         int mb_row = s->mb_y + ((yoff + my + 5 + 8 * height) >> 4);
-        ThreadFrame *f = dir ? &s->next_picture_ptr->tf : &s->last_picture_ptr->tf;
+        const ThreadFrame *f = dir ? &s->next_picture_ptr->tf : &s->last_picture_ptr->tf;
         ff_thread_await_progress(f, mb_row, 0);
     }
 
@@ -1445,7 +1444,7 @@ static int rv34_decode_slice(RV34DecContext *r, int end, const uint8_t* buf, int
 
     ff_init_block_index(s);
     while(!check_slice_end(r, s)) {
-        ff_update_block_index(s);
+        ff_update_block_index(s, 8, 0, 1);
 
         if(r->si.type)
             res = rv34_decode_inter_macroblock(r, r->intra_types + s->mb_x * 4 + 4);
@@ -1550,8 +1549,7 @@ int ff_rv34_decode_update_thread_context(AVCodecContext *dst, const AVCodecConte
 static int get_slice_offset(AVCodecContext *avctx, const uint8_t *buf, int n, int slice_count, int buf_size)
 {
     if (n < slice_count) {
-        if(avctx->slice_count) return avctx->slice_offset[n];
-        else                   return AV_RL32(buf + n*8 - 4) == 1 ? AV_RL32(buf + n*8) :  AV_RB32(buf + n*8);
+        return AV_RL32(buf + n*8 - 4) == 1 ? AV_RL32(buf + n*8) :  AV_RB32(buf + n*8);
     } else
         return buf_size;
 }
@@ -1562,24 +1560,24 @@ static int finish_frame(AVCodecContext *avctx, AVFrame *pict)
     MpegEncContext *s = &r->s;
     int got_picture = 0, ret;
 
-    ff_er_frame_end(&s->er);
+    ff_er_frame_end(&s->er, NULL);
     ff_mpv_frame_end(s);
     s->mb_num_left = 0;
 
     if (HAVE_THREADS && (s->avctx->active_thread_type & FF_THREAD_FRAME))
         ff_thread_report_progress(&s->current_picture_ptr->tf, INT_MAX, 0);
 
-    if (s->pict_type == AV_PICTURE_TYPE_B || s->low_delay) {
+    if (s->pict_type == AV_PICTURE_TYPE_B) {
         if ((ret = av_frame_ref(pict, s->current_picture_ptr->f)) < 0)
             return ret;
         ff_print_debug_info(s, s->current_picture_ptr, pict);
-        ff_mpv_export_qp_table(s, pict, s->current_picture_ptr, FF_QSCALE_TYPE_MPEG1);
+        ff_mpv_export_qp_table(s, pict, s->current_picture_ptr, FF_MPV_QSCALE_TYPE_MPEG1);
         got_picture = 1;
     } else if (s->last_picture_ptr) {
         if ((ret = av_frame_ref(pict, s->last_picture_ptr->f)) < 0)
             return ret;
         ff_print_debug_info(s, s->last_picture_ptr, pict);
-        ff_mpv_export_qp_table(s, pict, s->last_picture_ptr, FF_QSCALE_TYPE_MPEG1);
+        ff_mpv_export_qp_table(s, pict, s->last_picture_ptr, FF_MPV_QSCALE_TYPE_MPEG1);
         got_picture = 1;
     }
 
@@ -1596,15 +1594,13 @@ static AVRational update_sar(int old_w, int old_h, AVRational sar, int new_w, in
     return sar;
 }
 
-int ff_rv34_decode_frame(AVCodecContext *avctx,
-                            void *data, int *got_picture_ptr,
-                            AVPacket *avpkt)
+int ff_rv34_decode_frame(AVCodecContext *avctx, AVFrame *pict,
+                         int *got_picture_ptr, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
     int buf_size = avpkt->size;
     RV34DecContext *r = avctx->priv_data;
     MpegEncContext *s = &r->s;
-    AVFrame *pict = data;
     SliceInfo si;
     int i, ret;
     int slice_count;
@@ -1616,7 +1612,7 @@ int ff_rv34_decode_frame(AVCodecContext *avctx,
     /* no supplementary picture */
     if (buf_size == 0) {
         /* special case for last picture */
-        if (s->low_delay==0 && s->next_picture_ptr) {
+        if (s->next_picture_ptr) {
             if ((ret = av_frame_ref(pict, s->next_picture_ptr->f)) < 0)
                 return ret;
             s->next_picture_ptr = NULL;
@@ -1626,13 +1622,10 @@ int ff_rv34_decode_frame(AVCodecContext *avctx,
         return 0;
     }
 
-    if(!avctx->slice_count){
-        slice_count = (*buf++) + 1;
-        slices_hdr = buf + 4;
-        buf += 8 * slice_count;
-        buf_size -= 1 + 8 * slice_count;
-    }else
-        slice_count = avctx->slice_count;
+    slice_count = (*buf++) + 1;
+    slices_hdr = buf + 4;
+    buf += 8 * slice_count;
+    buf_size -= 1 + 8 * slice_count;
 
     offset = get_slice_offset(avctx, slices_hdr, 0, slice_count, buf_size);
     //parse first slice header to check whether this frame can be decoded
@@ -1662,7 +1655,7 @@ int ff_rv34_decode_frame(AVCodecContext *avctx,
             av_log(avctx, AV_LOG_ERROR, "New frame but still %d MB left.\n",
                    s->mb_num_left);
             if (!s->context_reinit)
-                ff_er_frame_end(&s->er);
+                ff_er_frame_end(&s->er, NULL);
             ff_mpv_frame_end(s);
         }
 
@@ -1699,6 +1692,8 @@ int ff_rv34_decode_frame(AVCodecContext *avctx,
             int i;
 
             r->tmp_b_block_base = av_malloc(s->linesize * 48);
+            if (!r->tmp_b_block_base)
+                return AVERROR(ENOMEM);
             for (i = 0; i < 2; i++)
                 r->tmp_b_block_y[i] = r->tmp_b_block_base
                                       + i * 16 * s->linesize;
@@ -1795,7 +1790,7 @@ int ff_rv34_decode_frame(AVCodecContext *avctx,
             av_log(avctx, AV_LOG_INFO, "marking unfished frame as finished\n");
             /* always mark the current frame as finished, frame-mt supports
              * only complete frames */
-            ff_er_frame_end(&s->er);
+            ff_er_frame_end(&s->er, NULL);
             ff_mpv_frame_end(s);
             s->mb_num_left = 0;
             ff_thread_report_progress(&s->current_picture_ptr->tf, INT_MAX, 0);

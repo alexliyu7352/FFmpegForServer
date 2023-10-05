@@ -212,16 +212,6 @@ void *av_malloc_array(size_t nmemb, size_t size)
     return av_malloc(result);
 }
 
-#if FF_API_AV_MALLOCZ_ARRAY
-void *av_mallocz_array(size_t nmemb, size_t size)
-{
-    size_t result;
-    if (size_mult(nmemb, size, &result) < 0)
-        return NULL;
-    return av_mallocz(result);
-}
-#endif
-
 void *av_realloc_array(void *ptr, size_t nmemb, size_t size)
 {
     size_t result;
@@ -510,6 +500,8 @@ void *av_fast_realloc(void *ptr, unsigned int *size, size_t min_size)
         return ptr;
 
     max_size = atomic_load_explicit(&max_alloc_size, memory_order_relaxed);
+    /* *size is an unsigned, so the real maximum is <= UINT_MAX. */
+    max_size = FFMIN(max_size, UINT_MAX);
 
     if (min_size > max_size) {
         *size = 0;
@@ -542,6 +534,8 @@ static inline void fast_malloc(void *ptr, unsigned int *size, size_t min_size, i
     }
 
     max_size = atomic_load_explicit(&max_alloc_size, memory_order_relaxed);
+    /* *size is an unsigned, so the real maximum is <= UINT_MAX. */
+    max_size = FFMIN(max_size, UINT_MAX);
 
     if (min_size > max_size) {
         av_freep(ptr);

@@ -29,10 +29,10 @@
 
 #define BITSTREAM_READER_LE
 #include "avcodec.h"
+#include "codec_internal.h"
+#include "decode.h"
 #include "get_bits.h"
 #include "indeo2data.h"
-#include "internal.h"
-#include "mathops.h"
 
 typedef struct Ir2Context{
     AVCodecContext *avctx;
@@ -150,14 +150,12 @@ static int ir2_decode_plane_inter(Ir2Context *ctx, int width, int height, uint8_
     return 0;
 }
 
-static int ir2_decode_frame(AVCodecContext *avctx,
-                        void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int ir2_decode_frame(AVCodecContext *avctx, AVFrame *picture,
+                            int *got_frame, AVPacket *avpkt)
 {
     Ir2Context * const s = avctx->priv_data;
     const uint8_t *buf   = avpkt->data;
     int buf_size         = avpkt->size;
-    AVFrame *picture     = data;
     AVFrame * const p    = s->picture;
     int start, ret;
     int ltab, ctab;
@@ -228,9 +226,9 @@ static int ir2_decode_frame(AVCodecContext *avctx,
 
 static av_cold void ir2_init_static(void)
 {
-    INIT_VLC_STATIC_FROM_LENGTHS(&ir2_vlc, CODE_VLC_BITS, IR2_CODES,
+    VLC_INIT_STATIC_FROM_LENGTHS(&ir2_vlc, CODE_VLC_BITS, IR2_CODES,
                                  &ir2_tab[0][1], 2, &ir2_tab[0][0], 2, 1,
-                                 0, INIT_VLC_OUTPUT_LE, 1 << CODE_VLC_BITS);
+                                 0, VLC_INIT_OUTPUT_LE, 1 << CODE_VLC_BITS);
 }
 
 static av_cold int ir2_decode_init(AVCodecContext *avctx)
@@ -260,15 +258,14 @@ static av_cold int ir2_decode_end(AVCodecContext *avctx)
     return 0;
 }
 
-const AVCodec ff_indeo2_decoder = {
-    .name           = "indeo2",
-    .long_name      = NULL_IF_CONFIG_SMALL("Intel Indeo 2"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_INDEO2,
+const FFCodec ff_indeo2_decoder = {
+    .p.name         = "indeo2",
+    CODEC_LONG_NAME("Intel Indeo 2"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_INDEO2,
     .priv_data_size = sizeof(Ir2Context),
     .init           = ir2_decode_init,
     .close          = ir2_decode_end,
-    .decode         = ir2_decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    FF_CODEC_DECODE_CB(ir2_decode_frame),
+    .p.capabilities = AV_CODEC_CAP_DR1,
 };

@@ -19,8 +19,7 @@
  */
 
 #include "libavutil/frame.h"
-#include "libavutil/pixdesc.h"
-#include "hwconfig.h"
+#include "hwaccel_internal.h"
 #include "vaapi_decode.h"
 #include "internal.h"
 #include "av1dec.h"
@@ -274,7 +273,7 @@ static int vaapi_av1_start_frame(AVCodecContext *avctx,
     };
 
     for (int i = 0; i < AV1_NUM_REF_FRAMES; i++) {
-        if (pic_param.pic_info_fields.bits.frame_type == AV1_FRAME_KEY)
+        if (pic_param.pic_info_fields.bits.frame_type == AV1_FRAME_KEY && frame_header->show_frame)
             pic_param.ref_frame_map[i] = VA_INVALID_ID;
         else
             pic_param.ref_frame_map[i] = ctx->ref_tab[i].valid ?
@@ -434,11 +433,11 @@ static int vaapi_av1_decode_slice(AVCodecContext *avctx,
     return 0;
 }
 
-const AVHWAccel ff_av1_vaapi_hwaccel = {
-    .name                 = "av1_vaapi",
-    .type                 = AVMEDIA_TYPE_VIDEO,
-    .id                   = AV_CODEC_ID_AV1,
-    .pix_fmt              = AV_PIX_FMT_VAAPI,
+const FFHWAccel ff_av1_vaapi_hwaccel = {
+    .p.name               = "av1_vaapi",
+    .p.type               = AVMEDIA_TYPE_VIDEO,
+    .p.id                 = AV_CODEC_ID_AV1,
+    .p.pix_fmt            = AV_PIX_FMT_VAAPI,
     .start_frame          = vaapi_av1_start_frame,
     .end_frame            = vaapi_av1_end_frame,
     .decode_slice         = vaapi_av1_decode_slice,

@@ -22,8 +22,8 @@
 #include "avcodec.h"
 #include "adx.h"
 #include "bytestream.h"
+#include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "put_bits.h"
 
 /**
@@ -183,22 +183,21 @@ static int adx_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         dst += BLOCK_SIZE;
     }
 
-    avpkt->pts = frame->pts;
-    avpkt->duration = frame->nb_samples;
     *got_packet_ptr = 1;
     return 0;
 }
 
-const AVCodec ff_adpcm_adx_encoder = {
-    .name           = "adpcm_adx",
-    .long_name      = NULL_IF_CONFIG_SMALL("SEGA CRI ADX ADPCM"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_ADPCM_ADX,
-    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
+const FFCodec ff_adpcm_adx_encoder = {
+    .p.name         = "adpcm_adx",
+    CODEC_LONG_NAME("SEGA CRI ADX ADPCM"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_ADPCM_ADX,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(ADXContext),
     .init           = adx_encode_init,
-    .encode2        = adx_encode_frame,
-    .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16,
+    FF_CODEC_ENCODE_CB(adx_encode_frame),
+    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    .caps_internal  = FF_CODEC_CAP_EOF_FLUSH,
 };

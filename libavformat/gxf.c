@@ -24,9 +24,9 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/common.h"
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 #include "gxf.h"
-#include "libavcodec/mpeg12data.h"
 
 struct gxf_stream_info {
     int64_t first_field;

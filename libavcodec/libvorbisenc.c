@@ -26,10 +26,9 @@
 #include "libavutil/opt.h"
 #include "avcodec.h"
 #include "audio_frame_queue.h"
+#include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "version.h"
-#include "vorbis.h"
 #include "vorbis_parser.h"
 
 
@@ -61,7 +60,7 @@ static const AVOption options[] = {
     { NULL }
 };
 
-static const AVCodecDefault defaults[] = {
+static const FFCodecDefault defaults[] = {
     { "b",  "0" },
     { NULL },
 };
@@ -374,20 +373,21 @@ static int libvorbis_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     return 0;
 }
 
-const AVCodec ff_libvorbis_encoder = {
-    .name           = "libvorbis",
-    .long_name      = NULL_IF_CONFIG_SMALL("libvorbis"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_VORBIS,
-    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
+const FFCodec ff_libvorbis_encoder = {
+    .p.name         = "libvorbis",
+    CODEC_LONG_NAME("libvorbis"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_VORBIS,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
                       AV_CODEC_CAP_SMALL_LAST_FRAME,
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
     .priv_data_size = sizeof(LibvorbisEncContext),
     .init           = libvorbis_encode_init,
-    .encode2        = libvorbis_encode_frame,
+    FF_CODEC_ENCODE_CB(libvorbis_encode_frame),
     .close          = libvorbis_encode_close,
-    .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
+    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .priv_class     = &vorbis_class,
+    .p.priv_class   = &vorbis_class,
     .defaults       = defaults,
-    .wrapper_name   = "libvorbis",
+    .p.wrapper_name = "libvorbis",
 };

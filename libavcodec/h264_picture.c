@@ -26,9 +26,11 @@
  */
 
 #include "libavutil/avassert.h"
+#include "libavutil/emms.h"
 #include "error_resilience.h"
 #include "avcodec.h"
 #include "h264dec.h"
+#include "hwaccel_internal.h"
 #include "mpegutils.h"
 #include "thread.h"
 #include "threadframe.h"
@@ -52,6 +54,7 @@ void ff_h264_unref_picture(H264Context *h, H264Picture *pic)
         av_buffer_unref(&pic->motion_val_buf[i]);
         av_buffer_unref(&pic->ref_index_buf[i]);
     }
+    av_buffer_unref(&pic->decode_error_flags);
 
     memset((uint8_t*)pic + off, 0, sizeof(*pic) - off);
 }
@@ -134,6 +137,10 @@ int ff_h264_ref_picture(H264Context *h, H264Picture *dst, H264Picture *src)
         dst->hwaccel_picture_private = dst->hwaccel_priv_buf->data;
     }
 
+    ret = av_buffer_replace(&dst->decode_error_flags, src->decode_error_flags);
+    if (ret < 0)
+        goto fail;
+
     h264_copy_picture_params(dst, src);
 
     return 0;
@@ -154,8 +161,7 @@ int ff_h264_replace_picture(H264Context *h, H264Picture *dst, const H264Picture 
     av_assert0(src->tf.f == src->f);
 
     dst->tf.f = dst->f;
-    ff_thread_release_ext_buffer(h->avctx, &dst->tf);
-    ret = ff_thread_ref_frame(&dst->tf, &src->tf);
+    ret = ff_thread_replace_frame(h->avctx, &dst->tf, &src->tf);
     if (ret < 0)
         goto fail;
 
@@ -184,6 +190,10 @@ int ff_h264_replace_picture(H264Context *h, H264Picture *dst, const H264Picture 
         goto fail;
 
     dst->hwaccel_picture_private = src->hwaccel_picture_private;
+
+    ret = av_buffer_replace(&dst->decode_error_flags, src->decode_error_flags);
+    if (ret < 0)
+        goto fail;
 
     h264_copy_picture_params(dst, src);
 
@@ -234,7 +244,7 @@ int ff_h264_field_end(H264Context *h, H264SliceContext *sl, int in_setup)
     }
 
     if (avctx->hwaccel) {
-        err = avctx->hwaccel->end_frame(avctx);
+        err = FF_HW_SIMPLE_CALL(avctx, end_frame);
         if (err < 0)
             av_log(avctx, AV_LOG_ERROR,
                    "hardware accelerator failed to decode picture\n");

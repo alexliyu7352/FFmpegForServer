@@ -39,6 +39,8 @@
 #include "libavutil/ffmath.h"
 
 #include "avcodec.h"
+#include "codec_internal.h"
+#include "decode.h"
 #include "internal.h"
 #include "wma.h"
 
@@ -109,14 +111,15 @@ static av_cold int wma_decode_init(AVCodecContext *avctx)
 
     /* init MDCT */
     for (i = 0; i < s->nb_block_sizes; i++) {
-        ret = ff_mdct_init(&s->mdct_ctx[i], s->frame_len_bits - i + 1,
-                           1, 1.0 / 32768.0);
+        float scale = 1.0 / 32768.0;
+        ret = av_tx_init(&s->mdct_ctx[i], &s->mdct_fn[i], AV_TX_FLOAT_MDCT,
+                         1, 1 << (s->frame_len_bits - i), &scale, AV_TX_FULL_IMDCT);
         if (ret < 0)
             return ret;
     }
 
     if (s->use_noise_coding) {
-        ret = ff_init_vlc_from_lengths(&s->hgain_vlc, HGAINVLCBITS,
+        ret = ff_vlc_init_from_lengths(&s->hgain_vlc, HGAINVLCBITS,
                                        FF_ARRAY_ELEMS(ff_wma_hgain_hufftab),
                                        &ff_wma_hgain_hufftab[0][1], 2,
                                        &ff_wma_hgain_hufftab[0][0], 2, 1,
@@ -127,7 +130,7 @@ static av_cold int wma_decode_init(AVCodecContext *avctx)
 
     if (s->use_exp_vlc) {
         // FIXME move out of context
-        ret = init_vlc(&s->exp_vlc, EXPVLCBITS, sizeof(ff_aac_scalefactor_bits),
+        ret = vlc_init(&s->exp_vlc, EXPVLCBITS, sizeof(ff_aac_scalefactor_bits),
                        ff_aac_scalefactor_bits, 1, 1,
                        ff_aac_scalefactor_code, 4, 4, 0);
         if (ret < 0)
@@ -446,7 +449,8 @@ static int wma_decode_block(WMACodecContext *s)
     int coef_nb_bits, total_gain;
     int nb_coefs[MAX_CHANNELS];
     float mdct_norm;
-    FFTContext *mdct;
+    AVTXContext *mdct;
+    av_tx_fn mdct_fn;
 
 #ifdef TRACE
     ff_tlog(s->avctx, "***decode_block: %d:%d\n",
@@ -755,14 +759,15 @@ static int wma_decode_block(WMACodecContext *s)
     }
 
 next:
-    mdct = &s->mdct_ctx[bsize];
+    mdct = s->mdct_ctx[bsize];
+    mdct_fn = s->mdct_fn[bsize];
 
     for (ch = 0; ch < channels; ch++) {
         int n4, index;
 
         n4 = s->block_len / 2;
         if (s->channel_coded[ch])
-            mdct->imdct_calc(mdct, s->output, s->coefs[ch]);
+            mdct_fn(mdct, s->output, s->coefs[ch], sizeof(float));
         else if (!(s->ms_stereo && ch == 1))
             memset(s->output, 0, sizeof(s->output));
 
@@ -819,10 +824,9 @@ static int wma_decode_frame(WMACodecContext *s, float **samples,
     return 0;
 }
 
-static int wma_decode_superframe(AVCodecContext *avctx, void *data,
+static int wma_decode_superframe(AVCodecContext *avctx, AVFrame *frame,
                                  int *got_frame_ptr, AVPacket *avpkt)
 {
-    AVFrame *frame = data;
     const uint8_t *buf = avpkt->data;
     int buf_size       = avpkt->size;
     WMACodecContext *s = avctx->priv_data;
@@ -841,6 +845,7 @@ static int wma_decode_superframe(AVCodecContext *avctx, void *data,
         if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
             return ret;
 
+        frame->pts = AV_NOPTS_VALUE;
         for (i = 0; i < s->avctx->ch_layout.nb_channels; i++)
             memcpy(frame->extended_data[i], &s->frame_out[i][0],
                    frame->nb_samples * sizeof(s->frame_out[i][0]));
@@ -973,9 +978,9 @@ static int wma_decode_superframe(AVCodecContext *avctx, void *data,
         samples_offset += s->frame_len;
     }
 
-    ff_dlog(s->avctx, "%d %d %d %d outbytes:%"PTRDIFF_SPECIFIER" eaten:%d\n",
+    ff_dlog(s->avctx, "%d %d %d %d eaten:%d\n",
             s->frame_len_bits, s->block_len_bits, s->frame_len, s->block_len,
-            (int8_t *) samples - (int8_t *) data, avctx->block_align);
+            avctx->block_align);
 
     *got_frame_ptr = 1;
 
@@ -999,36 +1004,36 @@ static av_cold void flush(AVCodecContext *avctx)
 }
 
 #if CONFIG_WMAV1_DECODER
-const AVCodec ff_wmav1_decoder = {
-    .name           = "wmav1",
-    .long_name      = NULL_IF_CONFIG_SMALL("Windows Media Audio 1"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_WMAV1,
+const FFCodec ff_wmav1_decoder = {
+    .p.name         = "wmav1",
+    CODEC_LONG_NAME("Windows Media Audio 1"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_WMAV1,
     .priv_data_size = sizeof(WMACodecContext),
     .init           = wma_decode_init,
     .close          = ff_wma_end,
-    .decode         = wma_decode_superframe,
+    FF_CODEC_DECODE_CB(wma_decode_superframe),
     .flush          = flush,
-    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
-    .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
+    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
 #endif
 #if CONFIG_WMAV2_DECODER
-const AVCodec ff_wmav2_decoder = {
-    .name           = "wmav2",
-    .long_name      = NULL_IF_CONFIG_SMALL("Windows Media Audio 2"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_WMAV2,
+const FFCodec ff_wmav2_decoder = {
+    .p.name         = "wmav2",
+    CODEC_LONG_NAME("Windows Media Audio 2"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_WMAV2,
     .priv_data_size = sizeof(WMACodecContext),
     .init           = wma_decode_init,
     .close          = ff_wma_end,
-    .decode         = wma_decode_superframe,
+    FF_CODEC_DECODE_CB(wma_decode_superframe),
     .flush          = flush,
-    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
-    .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
+    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_FLTP,
                                                       AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
 #endif

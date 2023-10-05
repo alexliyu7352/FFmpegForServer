@@ -28,9 +28,11 @@
 #include <inttypes.h>
 
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 #include "isom.h"
 #include "mov_chan.h"
+#include "libavcodec/flac.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/intfloat.h"
 #include "libavutil/dict.h"
@@ -50,9 +52,15 @@ typedef struct CafContext {
 
 static int probe(const AVProbeData *p)
 {
-    if (AV_RB32(p->buf) == MKBETAG('c','a','f','f') && AV_RB16(&p->buf[4]) == 1)
-        return AVPROBE_SCORE_MAX;
-    return 0;
+    if (AV_RB32(p->buf) != MKBETAG('c','a','f','f'))
+        return 0;
+    if (AV_RB16(&p->buf[4]) != 1)
+        return 0;
+    if (AV_RB32(p->buf + 8) != MKBETAG('d','e','s','c'))
+        return 0;
+    if (AV_RB64(p->buf + 12) != 32)
+        return 0;
+    return AVPROBE_SCORE_MAX;
 }
 
 /** Read audio description chunk */
@@ -169,6 +177,49 @@ static int read_kuki_chunk(AVFormatContext *s, int64_t size)
             }
             avio_skip(pb, size - ALAC_NEW_KUKI);
         }
+    } else if (st->codecpar->codec_id == AV_CODEC_ID_FLAC) {
+        int last, type, flac_metadata_size;
+        uint8_t buf[4];
+        /* The magic cookie format for FLAC consists mostly of an mp4 dfLa atom. */
+        if (size < (16 + FLAC_STREAMINFO_SIZE)) {
+            av_log(s, AV_LOG_ERROR, "invalid FLAC magic cookie\n");
+            return AVERROR_INVALIDDATA;
+        }
+        /* Check cookie version. */
+        if (avio_r8(pb) != 0) {
+            av_log(s, AV_LOG_ERROR, "unknown FLAC magic cookie\n");
+            return AVERROR_INVALIDDATA;
+        }
+        avio_rb24(pb); /* Flags */
+        /* read dfLa fourcc */
+        if (avio_read(pb, buf, 4) != 4) {
+            av_log(s, AV_LOG_ERROR, "failed to read FLAC magic cookie\n");
+            return pb->error < 0 ? pb->error : AVERROR_INVALIDDATA;
+        }
+        if (memcmp(buf, "dfLa", 4)) {
+            av_log(s, AV_LOG_ERROR, "invalid FLAC magic cookie\n");
+            return AVERROR_INVALIDDATA;
+        }
+        /* Check dfLa version. */
+        if (avio_r8(pb) != 0) {
+            av_log(s, AV_LOG_ERROR, "unknown dfLa version\n");
+            return AVERROR_INVALIDDATA;
+        }
+        avio_rb24(pb); /* Flags */
+        if (avio_read(pb, buf, sizeof(buf)) != sizeof(buf)) {
+            av_log(s, AV_LOG_ERROR, "failed to read FLAC metadata block header\n");
+            return pb->error < 0 ? pb->error : AVERROR_INVALIDDATA;
+        }
+        flac_parse_block_header(buf, &last, &type, &flac_metadata_size);
+        if (type != FLAC_METADATA_TYPE_STREAMINFO || flac_metadata_size != FLAC_STREAMINFO_SIZE) {
+            av_log(s, AV_LOG_ERROR, "STREAMINFO must be first FLACMetadataBlock\n");
+            return AVERROR_INVALIDDATA;
+        }
+        ret = ff_get_extradata(s, st->codecpar, pb, FLAC_STREAMINFO_SIZE);
+        if (ret < 0)
+            return ret;
+        if (!last)
+            av_log(s, AV_LOG_WARNING, "non-STREAMINFO FLACMetadataBlock(s) ignored\n");
     } else if (st->codecpar->codec_id == AV_CODEC_ID_OPUS) {
         // The data layout for Opus is currently unknown, so we do not export
         // extradata at all. Multichannel streams are not supported.
@@ -241,6 +292,8 @@ static void read_info_chunk(AVFormatContext *s, int64_t size)
         char value[1024];
         avio_get_str(pb, INT_MAX, key, sizeof(key));
         avio_get_str(pb, INT_MAX, value, sizeof(value));
+        if (!*key)
+            continue;
         av_dict_set(&s->metadata, key, value, 0);
     }
 }
@@ -340,7 +393,7 @@ static int read_header(AVFormatContext *s)
 
 found_data:
     if (caf->bytes_per_packet > 0 && caf->frames_per_packet > 0) {
-        if (caf->data_size > 0)
+        if (caf->data_size > 0 && caf->data_size / caf->bytes_per_packet < INT64_MAX / caf->frames_per_packet)
             st->nb_frames = (caf->data_size / caf->bytes_per_packet) * caf->frames_per_packet;
     } else if (ffstream(st)->nb_index_entries && st->duration > 0) {
         if (st->codecpar->sample_rate && caf->data_size / st->duration > INT64_MAX / st->codecpar->sample_rate / 8) {

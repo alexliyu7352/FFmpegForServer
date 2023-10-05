@@ -99,8 +99,8 @@ static VLC ccitt_vlc[2], ccitt_group3_2d_vlc;
 
 static av_cold void ccitt_unpack_init(void)
 {
-    static VLC_TYPE code_table1[528][2];
-    static VLC_TYPE code_table2[648][2];
+    static VLCElem code_table1[528];
+    static VLCElem code_table2[648];
     int i;
 
     ccitt_vlc[0].table = code_table1;
@@ -108,13 +108,13 @@ static av_cold void ccitt_unpack_init(void)
     ccitt_vlc[1].table = code_table2;
     ccitt_vlc[1].table_allocated = 648;
     for (i = 0; i < 2; i++) {
-        ff_init_vlc_sparse(&ccitt_vlc[i], 9, CCITT_SYMS,
+        ff_vlc_init_sparse(&ccitt_vlc[i], 9, CCITT_SYMS,
                            ccitt_codes_lens[i], 1, 1,
                            ccitt_codes_bits[i], 1, 1,
                            ccitt_syms, 2, 2,
-                           INIT_VLC_USE_NEW_STATIC);
+                           VLC_INIT_USE_STATIC);
     }
-    INIT_VLC_STATIC(&ccitt_group3_2d_vlc, 9, 11,
+    VLC_INIT_STATIC(&ccitt_group3_2d_vlc, 9, 11,
                     ccitt_group3_2d_lens, 1, 1,
                     ccitt_group3_2d_bits, 1, 1, 512);
 }

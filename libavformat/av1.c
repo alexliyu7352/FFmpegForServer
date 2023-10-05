@@ -23,7 +23,7 @@
 #include "libavutil/mem.h"
 #include "libavcodec/av1.h"
 #include "libavcodec/av1_parse.h"
-#include "libavcodec/profiles.h"
+#include "libavcodec/defs.h"
 #include "libavcodec/put_bits.h"
 #include "av1.h"
 #include "avio.h"
@@ -107,7 +107,7 @@ int ff_av1_filter_obus_buf(const uint8_t *in, uint8_t **out,
     if (!buf)
         return AVERROR(ENOMEM);
 
-    ffio_init_context(&pb, buf, len, 1, NULL, NULL, NULL, NULL);
+    ffio_init_write_context(&pb, buf, len);
 
     ret = av1_filter_obus(&pb.pub, in, *size, NULL);
     av_assert1(ret == len);
@@ -141,12 +141,12 @@ static int parse_color_config(AV1SequenceParameters *seq_params, GetBitContext *
 {
     int twelve_bit = 0;
     int high_bitdepth = get_bits1(gb);
-    if (seq_params->profile == FF_PROFILE_AV1_PROFESSIONAL && high_bitdepth)
+    if (seq_params->profile == AV_PROFILE_AV1_PROFESSIONAL && high_bitdepth)
         twelve_bit = get_bits1(gb);
 
     seq_params->bitdepth = 8 + (high_bitdepth * 2) + (twelve_bit * 2);
 
-    if (seq_params->profile == FF_PROFILE_AV1_HIGH)
+    if (seq_params->profile == AV_PROFILE_AV1_HIGH)
         seq_params->monochrome = 0;
     else
         seq_params->monochrome = get_bits1(gb);
@@ -176,10 +176,10 @@ static int parse_color_config(AV1SequenceParameters *seq_params, GetBitContext *
     } else {
         seq_params->color_range = get_bits1(gb);
 
-        if (seq_params->profile == FF_PROFILE_AV1_MAIN) {
+        if (seq_params->profile == AV_PROFILE_AV1_MAIN) {
             seq_params->chroma_subsampling_x = 1;
             seq_params->chroma_subsampling_y = 1;
-        } else if (seq_params->profile == FF_PROFILE_AV1_HIGH) {
+        } else if (seq_params->profile == AV_PROFILE_AV1_HIGH) {
             seq_params->chroma_subsampling_x = 0;
             seq_params->chroma_subsampling_y = 0;
         } else {
@@ -395,7 +395,8 @@ int ff_av1_parse_seq_header(AV1SequenceParameters *seq, const uint8_t *buf, int 
     return is_av1c ? 0 : AVERROR_INVALIDDATA;
 }
 
-int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
+int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size,
+                       int write_seq_header)
 {
     AVIOContext *meta_pb;
     AV1SequenceParameters seq_params;
@@ -485,7 +486,9 @@ int ff_isom_write_av1c(AVIOContext *pb, const uint8_t *buf, int size)
     flush_put_bits(&pbc);
 
     avio_write(pb, header, sizeof(header));
-    avio_write(pb, seq, seq_size);
+    if (write_seq_header) {
+        avio_write(pb, seq, seq_size);
+    }
 
     meta_size = avio_get_dyn_buf(meta_pb, &meta);
     if (meta_size)

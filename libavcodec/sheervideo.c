@@ -24,6 +24,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "get_bits.h"
 #include "thread.h"
 #include "sheervideodata.h"
@@ -1795,18 +1796,16 @@ static av_cold int build_vlc(VLC *vlc, const SheerTable *table)
             lens[count]  = len;
     }
 
-    ff_free_vlc(vlc);
-    return ff_init_vlc_from_lengths(vlc, SHEER_VLC_BITS, count,
+    ff_vlc_free(vlc);
+    return ff_vlc_init_from_lengths(vlc, SHEER_VLC_BITS, count,
                                     lens, sizeof(*lens), NULL, 0, 0, 0, 0, NULL);
 }
 
-static int decode_frame(AVCodecContext *avctx,
-                        void *data, int *got_frame,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *p,
+                        int *got_frame, AVPacket *avpkt)
 {
     SheerVideoContext *s = avctx->priv_data;
     const SheerTable *table;
-    AVFrame *p = data;
     GetBitContext gb;
     unsigned format;
     int ret;
@@ -1974,7 +1973,7 @@ static int decode_frame(AVCodecContext *avctx,
     }
 
     p->pict_type = AV_PICTURE_TYPE_I;
-    p->key_frame = 1;
+    p->flags |= AV_FRAME_FLAG_KEY;
 
     if ((ret = ff_thread_get_buffer(avctx, p, 0)) < 0)
         return ret;
@@ -1993,19 +1992,19 @@ static av_cold int decode_end(AVCodecContext *avctx)
 {
     SheerVideoContext *s = avctx->priv_data;
 
-    ff_free_vlc(&s->vlc[0]);
-    ff_free_vlc(&s->vlc[1]);
+    ff_vlc_free(&s->vlc[0]);
+    ff_vlc_free(&s->vlc[1]);
 
     return 0;
 }
 
-const AVCodec ff_sheervideo_decoder = {
-    .name             = "sheervideo",
-    .long_name        = NULL_IF_CONFIG_SMALL("BitJazz SheerVideo"),
-    .type             = AVMEDIA_TYPE_VIDEO,
-    .id               = AV_CODEC_ID_SHEERVIDEO,
+const FFCodec ff_sheervideo_decoder = {
+    .p.name           = "sheervideo",
+    CODEC_LONG_NAME("BitJazz SheerVideo"),
+    .p.type           = AVMEDIA_TYPE_VIDEO,
+    .p.id             = AV_CODEC_ID_SHEERVIDEO,
+    .p.capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
     .priv_data_size   = sizeof(SheerVideoContext),
     .close            = decode_end,
-    .decode           = decode_frame,
-    .capabilities     = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
+    FF_CODEC_DECODE_CB(decode_frame),
 };

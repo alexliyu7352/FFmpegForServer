@@ -28,7 +28,6 @@
 
 #include "avcodec.h"
 #include "encode.h"
-#include "internal.h"
 #include "put_bits.h"
 
 #define FRAC_BITS   15   /* fractional bits for sb_samples and dct */
@@ -83,10 +82,6 @@ static av_cold int MPA_encode_init(AVCodecContext *avctx)
     int i, v, table;
     float a;
 
-    if (channels <= 0 || channels > 2){
-        av_log(avctx, AV_LOG_ERROR, "encoding %d channel(s) is not allowed in mp2\n", channels);
-        return AVERROR(EINVAL);
-    }
     bitrate = bitrate / 1000;
     s->nb_channels = channels;
     avctx->frame_size = MPA_FRAME_SIZE;
@@ -779,7 +774,7 @@ static int MPA_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     return 0;
 }
 
-static const AVCodecDefault mp2_defaults[] = {
+static const FFCodecDefault mp2_defaults[] = {
     { "b", "0" },
     { NULL },
 };

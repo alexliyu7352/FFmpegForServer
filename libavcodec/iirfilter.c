@@ -26,8 +26,12 @@
 
 #include <math.h>
 
+#include "config.h"
+
 #include "libavutil/attributes.h"
 #include "libavutil/common.h"
+#include "libavutil/log.h"
+#include "libavutil/mem.h"
 
 #include "iirfilter.h"
 
@@ -330,6 +334,7 @@ av_cold void ff_iir_filter_free_coeffsp(struct FFIIRFilterCoeffs **coeffsp)
 void ff_iir_filter_init(FFIIRFilterContext *f) {
     f->filter_flt = iir_filter_flt;
 
-    if (HAVE_MIPSFPU)
-        ff_iir_filter_init_mips(f);
+#if HAVE_MIPSFPU
+    ff_iir_filter_init_mips(f);
+#endif
 }

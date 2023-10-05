@@ -27,7 +27,6 @@
 
 #include <stdint.h>
 
-#include "config.h"
 #include "config_components.h"
 #include "libavutil/avassert.h"
 #include "libavutil/dict.h"
@@ -38,6 +37,7 @@
 #include "avformat.h"
 #include "avio.h"
 #include "avio_internal.h"
+#include "demux.h"
 #include "id3v2.h"
 #include "internal.h"
 #include "metadata.h"
@@ -555,7 +555,7 @@ static int wav_read_header(AVFormatContext *s)
         case MKTAG('I', 'D', '3', ' '):
         case MKTAG('i', 'd', '3', ' '): {
             ID3v2ExtraMeta *id3v2_extra_meta;
-            ff_id3v2_read_dict(pb, &ffformatcontext(s)->id3v2_meta, ID3v2_DEFAULT_MAGIC, &id3v2_extra_meta);
+            ff_id3v2_read(s, ID3v2_DEFAULT_MAGIC, &id3v2_extra_meta, 0);
             if (id3v2_extra_meta) {
                 ff_id3v2_parse_apic(s, id3v2_extra_meta);
                 ff_id3v2_parse_chapters(s, id3v2_extra_meta);
@@ -730,6 +730,10 @@ smv_retry:
                 goto smv_out;
             }
             size = avio_rl24(s->pb);
+            if (size > wav->smv_block_size) {
+                ret = AVERROR_EOF;
+                goto smv_out;
+            }
             ret  = av_get_packet(s->pb, pkt, size);
             if (ret < 0)
                 goto smv_out;

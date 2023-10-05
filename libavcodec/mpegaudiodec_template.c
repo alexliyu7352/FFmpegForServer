@@ -36,8 +36,8 @@
 #include "libavutil/thread.h"
 
 #include "avcodec.h"
+#include "decode.h"
 #include "get_bits.h"
-#include "internal.h"
 #include "mathops.h"
 #include "mpegaudiodsp.h"
 
@@ -374,7 +374,7 @@ static int handle_crc(MPADecodeContext *s, int sec_len)
         crc_val = av_crc(crc_tab, crc_val, &buf[6], sec_byte_len);
 
         AV_WB32(tmp_buf,
-                ((buf[6 + sec_byte_len] & (0xFF00 >> sec_rem_bits)) << 24) +
+                ((buf[6 + sec_byte_len] & (0xFF00U >> sec_rem_bits)) << 24) +
                 ((s->crc << 16) >> sec_rem_bits));
 
         crc_val = av_crc(crc_tab, crc_val, tmp_buf, 3);
@@ -1548,8 +1548,8 @@ static int mp_decode_frame(MPADecodeContext *s, OUT_INT **samples,
     return nb_frames * 32 * sizeof(OUT_INT) * s->nb_channels;
 }
 
-static int decode_frame(AVCodecContext * avctx, void *data, int *got_frame_ptr,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                        int *got_frame_ptr, AVPacket *avpkt)
 {
     const uint8_t *buf  = avpkt->data;
     int buf_size        = avpkt->size;
@@ -1596,7 +1596,7 @@ static int decode_frame(AVCodecContext * avctx, void *data, int *got_frame_ptr,
         buf_size= s->frame_size;
     }
 
-    s->frame = data;
+    s->frame = frame;
 
     ret = mp_decode_frame(s, NULL, buf, buf_size);
     if (ret >= 0) {
@@ -1633,7 +1633,7 @@ static void flush(AVCodecContext *avctx)
 }
 
 #if CONFIG_MP3ADU_DECODER || CONFIG_MP3ADUFLOAT_DECODER
-static int decode_frame_adu(AVCodecContext *avctx, void *data,
+static int decode_frame_adu(AVCodecContext *avctx, AVFrame *frame,
                             int *got_frame_ptr, AVPacket *avpkt)
 {
     const uint8_t *buf  = avpkt->data;
@@ -1672,7 +1672,7 @@ static int decode_frame_adu(AVCodecContext *avctx, void *data,
 
     s->frame_size = len;
 
-    s->frame = data;
+    s->frame = frame;
 
     ret = mp_decode_frame(s, NULL, buf, buf_size);
     if (ret < 0) {
@@ -1813,10 +1813,9 @@ static void flush_mp3on4(AVCodecContext *avctx)
 }
 
 
-static int decode_frame_mp3on4(AVCodecContext *avctx, void *data,
+static int decode_frame_mp3on4(AVCodecContext *avctx, AVFrame *frame,
                                int *got_frame_ptr, AVPacket *avpkt)
 {
-    AVFrame *frame         = data;
     const uint8_t *buf     = avpkt->data;
     int buf_size           = avpkt->size;
     MP3On4DecodeContext *s = avctx->priv_data;

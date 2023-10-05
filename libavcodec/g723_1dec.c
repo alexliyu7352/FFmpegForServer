@@ -33,9 +33,9 @@
 #include "acelp_vectors.h"
 #include "avcodec.h"
 #include "celp_filters.h"
-#include "celp_math.h"
+#include "codec_internal.h"
+#include "decode.h"
 #include "get_bits.h"
-#include "internal.h"
 #include "g723_1.h"
 
 #define CNG_RANDOM_SEED 12345
@@ -924,11 +924,10 @@ static void generate_noise(G723_1_ChannelContext *p)
            PITCH_MAX * sizeof(*p->excitation));
 }
 
-static int g723_1_decode_frame(AVCodecContext *avctx, void *data,
+static int g723_1_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                                int *got_frame_ptr, AVPacket *avpkt)
 {
     G723_1_Context *s  = avctx->priv_data;
-    AVFrame *frame     = data;
     const uint8_t *buf = avpkt->data;
     int buf_size       = avpkt->size;
     int dec_mode       = buf[0] & 3;
@@ -1111,15 +1110,18 @@ static const AVClass g723_1dec_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVCodec ff_g723_1_decoder = {
-    .name           = "g723_1",
-    .long_name      = NULL_IF_CONFIG_SMALL("G.723.1"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_G723_1,
+const FFCodec ff_g723_1_decoder = {
+    .p.name         = "g723_1",
+    CODEC_LONG_NAME("G.723.1"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_G723_1,
     .priv_data_size = sizeof(G723_1_Context),
     .init           = g723_1_decode_init,
-    .decode         = g723_1_decode_frame,
-    .capabilities   = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1,
-    .priv_class     = &g723_1dec_class,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    FF_CODEC_DECODE_CB(g723_1_decode_frame),
+    .p.capabilities =
+#if FF_API_SUBFRAMES
+                      AV_CODEC_CAP_SUBFRAMES |
+#endif
+                      AV_CODEC_CAP_DR1,
+    .p.priv_class   = &g723_1dec_class,
 };

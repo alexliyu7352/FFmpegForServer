@@ -26,15 +26,14 @@
  */
 
 #include "libavutil/avstring.h"
+#include "libavutil/file_open.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
 #include "drawutils.h"
-#include "formats.h"
 #include "framesync.h"
 #include "internal.h"
 #include "psnr.h"
-#include "video.h"
 
 typedef struct PSNRContext {
     const AVClass *class;
@@ -189,6 +188,13 @@ static int do_psnr(FFFrameSync *fs)
         td.planeheight[c] = s->planeheight[c];
     }
 
+    if (master->color_range != ref->color_range) {
+        av_log(ctx, AV_LOG_WARNING, "master and reference "
+               "frames use different color ranges (%s != %s)\n",
+               av_color_range_name(master->color_range),
+               av_color_range_name(ref->color_range));
+    }
+
     ff_filter_execute(ctx, compute_images_mse, &td, NULL,
                       FFMIN(s->planeheight[1], s->nb_threads));
 
@@ -280,7 +286,7 @@ static av_cold int init(AVFilterContext *ctx)
         if (!strcmp(s->stats_file_str, "-")) {
             s->stats_file = stdout;
         } else {
-            s->stats_file = fopen(s->stats_file_str, "w");
+            s->stats_file = avpriv_fopen_utf8(s->stats_file_str, "w");
             if (!s->stats_file) {
                 int err = AVERROR(errno);
                 char buf[128];
@@ -354,8 +360,9 @@ static int config_input_ref(AVFilterLink *inlink)
     s->average_max = lrint(average_max);
 
     s->dsp.sse_line = desc->comp[0].depth > 8 ? sse_line_16bit : sse_line_8bit;
-    if (ARCH_X86)
-        ff_psnr_init_x86(&s->dsp, desc->comp[0].depth);
+#if ARCH_X86
+    ff_psnr_init_x86(&s->dsp, desc->comp[0].depth);
+#endif
 
     s->score = av_calloc(s->nb_threads, sizeof(*s->score));
     if (!s->score)

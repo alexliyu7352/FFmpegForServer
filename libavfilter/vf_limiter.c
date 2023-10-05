@@ -22,7 +22,6 @@
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "formats.h"
 #include "internal.h"
 #include "limiter.h"
 #include "video.h"
@@ -141,8 +140,9 @@ static int config_input(AVFilterLink *inlink)
         s->dsp.limiter = limiter16;
     }
 
-    if (ARCH_X86)
-        ff_limiter_init_x86(&s->dsp, desc->comp[0].depth);
+#if ARCH_X86
+    ff_limiter_init_x86(&s->dsp, desc->comp[0].depth);
+#endif
 
     return 0;
 }
@@ -230,13 +230,6 @@ static const AVFilterPad inputs[] = {
     },
 };
 
-static const AVFilterPad outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
 const AVFilter ff_vf_limiter = {
     .name          = "limiter",
     .description   = NULL_IF_CONFIG_SMALL("Limit pixels components to the specified range."),
@@ -244,7 +237,7 @@ const AVFilter ff_vf_limiter = {
     .priv_class    = &limiter_class,
     .init          = init,
     FILTER_INPUTS(inputs),
-    FILTER_OUTPUTS(outputs),
+    FILTER_OUTPUTS(ff_video_default_filterpad),
     FILTER_PIXFMTS_ARRAY(pix_fmts),
     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
     .process_command = process_command,

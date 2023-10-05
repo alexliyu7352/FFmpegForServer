@@ -33,20 +33,22 @@
 #include "libavutil/avstring.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/crc.h"
+#include "libavutil/emms.h"
 #include "libavutil/internal.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/thread.h"
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "config_components.h"
 #include "encode.h"
-#include "internal.h"
 #include "me_cmp.h"
 #include "put_bits.h"
 #include "audiodsp.h"
 #include "ac3dsp.h"
 #include "ac3.h"
-#include "fft.h"
+#include "ac3defs.h"
+#include "ac3tab.h"
 #include "ac3enc.h"
 #include "eac3enc.h"
 
@@ -133,7 +135,7 @@ const AVClass ff_ac3enc_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVCodecDefault ff_ac3_enc_defaults[] = {
+const FFCodecDefault ff_ac3_enc_defaults[] = {
     { "b",  "0" },
     { NULL }
 };
@@ -2201,7 +2203,7 @@ av_cold int ff_ac3_encode_close(AVCodecContext *avctx)
         av_freep(&block->cpl_coord_mant);
     }
 
-    s->mdct_end(s);
+    av_tx_uninit(&s->tx);
 
     return 0;
 }
@@ -2611,7 +2613,7 @@ av_cold int ff_ac3_encode_init(AVCodecContext *avctx)
 
     ff_audiodsp_init(&s->adsp);
     ff_me_cmp_init(&s->mecc, avctx);
-    ff_ac3dsp_init(&s->ac3dsp, avctx->flags & AV_CODEC_FLAG_BITEXACT);
+    ff_ac3dsp_init(&s->ac3dsp);
 
     dprint_options(s);
 

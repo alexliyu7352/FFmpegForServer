@@ -28,7 +28,8 @@
 #include "libavutil/internal.h"
 #include "avcodec.h"
 #include "codec_id.h"
-#include "internal.h"
+#include "codec_internal.h"
+#include "decode.h"
 
 typedef struct {
     int fq, q, s, lt;
@@ -37,7 +38,8 @@ typedef struct {
 // DFPWM codec from https://github.com/ChenThread/dfpwm/blob/master/1a/
 // Licensed in the public domain
 
-static void au_decompress(DFPWMState *state, int fs, int len, uint8_t *outbuf, uint8_t *inbuf)
+static void au_decompress(DFPWMState *state, int fs, int len,
+                          uint8_t *outbuf, const uint8_t *inbuf)
 {
     unsigned d;
     for (int i = 0; i < len; i++) {
@@ -83,11 +85,6 @@ static av_cold int dfpwm_dec_init(struct AVCodecContext *ctx)
 {
     DFPWMState *state = ctx->priv_data;
 
-    if (ctx->ch_layout.nb_channels <= 0) {
-        av_log(ctx, AV_LOG_ERROR, "Invalid number of channels\n");
-        return AVERROR(EINVAL);
-    }
-
     state->fq = 0;
     state->q = 0;
     state->s = 0;
@@ -99,14 +96,16 @@ static av_cold int dfpwm_dec_init(struct AVCodecContext *ctx)
     return 0;
 }
 
-static int dfpwm_dec_frame(struct AVCodecContext *ctx, void *data,
-    int *got_frame, struct AVPacket *packet)
+static int dfpwm_dec_frame(struct AVCodecContext *ctx, AVFrame *frame,
+                           int *got_frame, struct AVPacket *packet)
 {
     DFPWMState *state = ctx->priv_data;
-    AVFrame *frame = data;
     int ret;
 
-    frame->nb_samples = packet->size * 8 / ctx->ch_layout.nb_channels;
+    if (packet->size * 8LL % ctx->ch_layout.nb_channels)
+        return AVERROR_PATCHWELCOME;
+
+    frame->nb_samples = packet->size * 8LL / ctx->ch_layout.nb_channels;
     if (frame->nb_samples <= 0) {
         av_log(ctx, AV_LOG_ERROR, "invalid number of samples in packet\n");
         return AVERROR_INVALIDDATA;
@@ -121,14 +120,13 @@ static int dfpwm_dec_frame(struct AVCodecContext *ctx, void *data,
     return packet->size;
 }
 
-const AVCodec ff_dfpwm_decoder = {
-    .name           = "dfpwm",
-    .long_name      = NULL_IF_CONFIG_SMALL("DFPWM1a audio"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_DFPWM,
+const FFCodec ff_dfpwm_decoder = {
+    .p.name         = "dfpwm",
+    CODEC_LONG_NAME("DFPWM1a audio"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_DFPWM,
     .priv_data_size = sizeof(DFPWMState),
     .init           = dfpwm_dec_init,
-    .decode         = dfpwm_dec_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    FF_CODEC_DECODE_CB(dfpwm_dec_frame),
+    .p.capabilities = AV_CODEC_CAP_DR1,
 };

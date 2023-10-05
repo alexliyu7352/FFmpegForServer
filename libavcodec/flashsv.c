@@ -35,15 +35,16 @@
 
 #include "config_components.h"
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <stddef.h>
 #include <zlib.h>
 
 #include "libavutil/intreadwrite.h"
 #include "avcodec.h"
 #include "bytestream.h"
+#include "codec_internal.h"
+#include "decode.h"
 #include "get_bits.h"
-#include "internal.h"
+#include "zlib_wrapper.h"
 
 typedef struct BlockInfo {
     const uint8_t *pos;
@@ -57,7 +58,6 @@ typedef struct FlashSVContext {
     int             block_width, block_height;
     uint8_t        *tmpblock;
     int             block_size;
-    z_stream        zstream;
     int             ver;
     const uint32_t *pal;
     int             is_keyframe;
@@ -68,6 +68,7 @@ typedef struct FlashSVContext {
     int             color_depth;
     int             zlibprime_curr, zlibprime_prev;
     int             diff_start, diff_height;
+    FFZStream       zstream;
     uint8_t         tmp[UINT16_MAX];
 } FlashSVContext;
 
@@ -106,7 +107,8 @@ static int decode_hybrid(const uint8_t *sptr, const uint8_t *sptr_end, uint8_t *
 static av_cold int flashsv_decode_end(AVCodecContext *avctx)
 {
     FlashSVContext *s = avctx->priv_data;
-    inflateEnd(&s->zstream);
+
+    ff_inflate_end(&s->zstream);
     /* release the frame if needed */
     av_frame_free(&s->frame);
 
@@ -119,17 +121,8 @@ static av_cold int flashsv_decode_end(AVCodecContext *avctx)
 static av_cold int flashsv_decode_init(AVCodecContext *avctx)
 {
     FlashSVContext *s = avctx->priv_data;
-    int zret; // Zlib return code
 
     s->avctx          = avctx;
-    s->zstream.zalloc = Z_NULL;
-    s->zstream.zfree  = Z_NULL;
-    s->zstream.opaque = Z_NULL;
-    zret = inflateInit(&s->zstream);
-    if (zret != Z_OK) {
-        av_log(avctx, AV_LOG_ERROR, "Inflate init error: %d\n", zret);
-        return AVERROR_EXTERNAL;
-    }
     avctx->pix_fmt = AV_PIX_FMT_BGR24;
 
     s->frame = av_frame_alloc();
@@ -137,27 +130,30 @@ static av_cold int flashsv_decode_init(AVCodecContext *avctx)
         return AVERROR(ENOMEM);
     }
 
-    return 0;
+    return ff_inflate_init(&s->zstream, avctx);
 }
 
 static int flashsv2_prime(FlashSVContext *s, const uint8_t *src, int size)
 {
     int zret; // Zlib return code
     static const uint8_t zlib_header[] = { 0x78, 0x01 };
+    z_stream *const zstream = &s->zstream.zstream;
     uint8_t *data = s->tmpblock;
     unsigned remaining;
 
     if (!src)
         return AVERROR_INVALIDDATA;
 
-    s->zstream.next_in   = src;
-    s->zstream.avail_in  = size;
-    s->zstream.next_out  = data;
-    s->zstream.avail_out = s->block_size * 3;
-    inflate(&s->zstream, Z_SYNC_FLUSH);
-    remaining = s->block_size * 3 - s->zstream.avail_out;
+    zstream->next_in   = src;
+    zstream->avail_in  = size;
+    zstream->next_out  = data;
+    zstream->avail_out = s->block_size * 3;
+    zret = inflate(zstream, Z_SYNC_FLUSH);
+    if (zret != Z_OK && zret != Z_STREAM_END)
+        return AVERROR_UNKNOWN;
+    remaining = s->block_size * 3 - zstream->avail_out;
 
-    if ((zret = inflateReset(&s->zstream)) != Z_OK) {
+    if ((zret = inflateReset(zstream)) != Z_OK) {
         av_log(s->avctx, AV_LOG_ERROR, "Inflate reset error: %d\n", zret);
         return AVERROR_UNKNOWN;
     }
@@ -168,9 +164,11 @@ static int flashsv2_prime(FlashSVContext *s, const uint8_t *src, int size)
      * the adler32 checksum is correctly initialized).
      * This is accomplished by synthetizing blocks of uncompressed data
      * out of the output from above. See section 3.2.4 of RFC 1951. */
-    s->zstream.next_in  = zlib_header;
-    s->zstream.avail_in = sizeof(zlib_header);
-    inflate(&s->zstream, Z_SYNC_FLUSH);
+    zstream->next_in  = zlib_header;
+    zstream->avail_in = sizeof(zlib_header);
+    zret = inflate(zstream, Z_SYNC_FLUSH);
+    if (zret != Z_OK)
+        return AVERROR_UNKNOWN;
     while (remaining > 0) {
         unsigned block_size = FFMIN(UINT16_MAX, remaining);
         uint8_t header[5];
@@ -180,16 +178,16 @@ static int flashsv2_prime(FlashSVContext *s, const uint8_t *src, int size)
         AV_WL16(header + 1, block_size);
         /* Block size (one's complement) */
         AV_WL16(header + 3, block_size ^ 0xFFFF);
-        s->zstream.next_in   = header;
-        s->zstream.avail_in  = sizeof(header);
-        s->zstream.next_out  = s->tmp;
-        s->zstream.avail_out = sizeof(s->tmp);
-        zret = inflate(&s->zstream, Z_SYNC_FLUSH);
+        zstream->next_in   = header;
+        zstream->avail_in  = sizeof(header);
+        zstream->next_out  = s->tmp;
+        zstream->avail_out = sizeof(s->tmp);
+        zret = inflate(zstream, Z_SYNC_FLUSH);
         if (zret != Z_OK)
             return AVERROR_UNKNOWN;
-        s->zstream.next_in   = data;
-        s->zstream.avail_in  = block_size;
-        zret = inflate(&s->zstream, Z_SYNC_FLUSH);
+        zstream->next_in   = data;
+        zstream->avail_in  = block_size;
+        zret = inflate(zstream, Z_SYNC_FLUSH);
         if (zret != Z_OK)
             return AVERROR_UNKNOWN;
         data      += block_size;
@@ -205,9 +203,10 @@ static int flashsv_decode_block(AVCodecContext *avctx, const AVPacket *avpkt,
                                 int blk_idx)
 {
     struct FlashSVContext *s = avctx->priv_data;
+    z_stream *const zstream = &s->zstream.zstream;
     uint8_t *line = s->tmpblock;
     int k;
-    int ret = inflateReset(&s->zstream);
+    int ret = inflateReset(zstream);
     if (ret != Z_OK) {
         av_log(avctx, AV_LOG_ERROR, "Inflate reset error: %d\n", ret);
         return AVERROR_UNKNOWN;
@@ -219,15 +218,15 @@ static int flashsv_decode_block(AVCodecContext *avctx, const AVPacket *avpkt,
         if (ret < 0)
             return ret;
     }
-    s->zstream.next_in   = avpkt->data + get_bits_count(gb) / 8;
-    s->zstream.avail_in  = block_size;
-    s->zstream.next_out  = s->tmpblock;
-    s->zstream.avail_out = s->block_size * 3;
-    ret = inflate(&s->zstream, Z_FINISH);
+    zstream->next_in   = avpkt->data + get_bits_count(gb) / 8;
+    zstream->avail_in  = block_size;
+    zstream->next_out  = s->tmpblock;
+    zstream->avail_out = s->block_size * 3;
+    ret = inflate(zstream, Z_FINISH);
     if (ret == Z_DATA_ERROR) {
         av_log(avctx, AV_LOG_ERROR, "Zlib resync occurred\n");
-        inflateSync(&s->zstream);
-        ret = inflate(&s->zstream, Z_FINISH);
+        inflateSync(zstream);
+        ret = inflate(zstream, Z_FINISH);
     }
 
     if (ret != Z_OK && ret != Z_STREAM_END) {
@@ -253,7 +252,7 @@ static int flashsv_decode_block(AVCodecContext *avctx, const AVPacket *avpkt,
         }
     } else {
         /* hybrid 15-bit/palette mode */
-        ret = decode_hybrid(s->tmpblock, s->zstream.next_out,
+        ret = decode_hybrid(s->tmpblock, zstream->next_out,
                       s->frame->data[0],
                       s->image_height - (y_pos + 1 + s->diff_height),
                       x_pos, s->diff_height, width,
@@ -267,7 +266,7 @@ static int flashsv_decode_block(AVCodecContext *avctx, const AVPacket *avpkt,
     return 0;
 }
 
-static int flashsv_decode_frame(AVCodecContext *avctx, void *data,
+static int flashsv_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
                                 int *got_frame, AVPacket *avpkt)
 {
     int buf_size = avpkt->size;
@@ -350,6 +349,9 @@ static int flashsv_decode_frame(AVCodecContext *avctx, void *data,
         if (err < 0)
             return err;
         s->keyframedata = avpkt->data;
+        if (s->blocks)
+            memset(s->blocks, 0, (v_blocks + !!v_part) * (h_blocks + !!h_part) *
+                                 sizeof(s->blocks[0]));
     }
     if(s->ver == 2 && !s->blocks)
         s->blocks = av_mallocz((v_blocks + !!v_part) * (h_blocks + !!h_part) *
@@ -484,7 +486,7 @@ static int flashsv_decode_frame(AVCodecContext *avctx, void *data,
                s->frame->linesize[0] * avctx->height);
     }
 
-    if ((ret = av_frame_ref(data, s->frame)) < 0)
+    if ((ret = av_frame_ref(rframe, s->frame)) < 0)
         return ret;
 
     *got_frame = 1;
@@ -498,18 +500,18 @@ static int flashsv_decode_frame(AVCodecContext *avctx, void *data,
 }
 
 #if CONFIG_FLASHSV_DECODER
-const AVCodec ff_flashsv_decoder = {
-    .name           = "flashsv",
-    .long_name      = NULL_IF_CONFIG_SMALL("Flash Screen Video v1"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_FLASHSV,
+const FFCodec ff_flashsv_decoder = {
+    .p.name         = "flashsv",
+    CODEC_LONG_NAME("Flash Screen Video v1"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_FLASHSV,
     .priv_data_size = sizeof(FlashSVContext),
     .init           = flashsv_decode_init,
     .close          = flashsv_decode_end,
-    .decode         = flashsv_decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
-    .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_BGR24, AV_PIX_FMT_NONE },
+    FF_CODEC_DECODE_CB(flashsv_decode_frame),
+    .p.capabilities = AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_BGR24, AV_PIX_FMT_NONE },
 };
 #endif /* CONFIG_FLASHSV_DECODER */
 
@@ -558,6 +560,7 @@ static av_cold int flashsv2_decode_end(AVCodecContext *avctx)
     FlashSVContext *s = avctx->priv_data;
 
     av_buffer_unref(&s->keyframedata_buf);
+    s->keyframedata = NULL;
     av_freep(&s->blocks);
     av_freep(&s->keyframe);
     flashsv_decode_end(avctx);
@@ -565,17 +568,17 @@ static av_cold int flashsv2_decode_end(AVCodecContext *avctx)
     return 0;
 }
 
-const AVCodec ff_flashsv2_decoder = {
-    .name           = "flashsv2",
-    .long_name      = NULL_IF_CONFIG_SMALL("Flash Screen Video v2"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_FLASHSV2,
+const FFCodec ff_flashsv2_decoder = {
+    .p.name         = "flashsv2",
+    CODEC_LONG_NAME("Flash Screen Video v2"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_FLASHSV2,
     .priv_data_size = sizeof(FlashSVContext),
     .init           = flashsv2_decode_init,
     .close          = flashsv2_decode_end,
-    .decode         = flashsv_decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
-    .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_BGR24, AV_PIX_FMT_NONE },
+    FF_CODEC_DECODE_CB(flashsv_decode_frame),
+    .p.capabilities = AV_CODEC_CAP_DR1,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_BGR24, AV_PIX_FMT_NONE },
 };
 #endif /* CONFIG_FLASHSV2_DECODER */

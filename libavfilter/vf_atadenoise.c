@@ -34,7 +34,6 @@
 #include "bufferqueue.h"
 
 #include "atadenoise.h"
-#include "formats.h"
 #include "internal.h"
 #include "video.h"
 
@@ -154,7 +153,6 @@ static void fweight_row##name(const uint8_t *ssrc, uint8_t *ddst,           \
        unsigned ldiff, rdiff;                                               \
        float sum = srcx;                                                    \
        float wsum = 1.f;                                                    \
-       int l = 0, r = 0;                                                    \
        int srcjx, srcix;                                                    \
                                                                             \
        for (int j = mid - 1, i = mid + 1; j >= 0 && i < size; j--, i++) {   \
@@ -165,7 +163,6 @@ static void fweight_row##name(const uint8_t *ssrc, uint8_t *ddst,           \
            if (ldiff > thra ||                                              \
                lsumdiff > thrb)                                             \
                break;                                                       \
-           l++;                                                             \
            sum += srcjx * weights[j];                                       \
            wsum += weights[j];                                              \
                                                                             \
@@ -176,7 +173,6 @@ static void fweight_row##name(const uint8_t *ssrc, uint8_t *ddst,           \
            if (rdiff > thra ||                                              \
                rsumdiff > thrb)                                             \
                break;                                                       \
-           r++;                                                             \
            sum += srcix * weights[i];                                       \
            wsum += weights[i];                                              \
        }                                                                    \
@@ -205,7 +201,6 @@ static void fweight_row##name##_serial(const uint8_t *ssrc, uint8_t *ddst,  \
        unsigned ldiff, rdiff;                                               \
        float sum = srcx;                                                    \
        float wsum = 1.f;                                                    \
-       int l = 0, r = 0;                                                    \
        int srcjx, srcix;                                                    \
                                                                             \
        for (int j = mid - 1; j >= 0; j--) {                                 \
@@ -216,7 +211,6 @@ static void fweight_row##name##_serial(const uint8_t *ssrc, uint8_t *ddst,  \
            if (ldiff > thra ||                                              \
                lsumdiff > thrb)                                             \
                break;                                                       \
-           l++;                                                             \
            sum += srcjx * weights[j];                                       \
            wsum += weights[j];                                              \
        }                                                                    \
@@ -229,7 +223,6 @@ static void fweight_row##name##_serial(const uint8_t *ssrc, uint8_t *ddst,  \
            if (rdiff > thra ||                                              \
                rsumdiff > thrb)                                             \
                break;                                                       \
-           r++;                                                             \
            sum += srcix * weights[i];                                       \
            wsum += weights[i];                                              \
        }                                                                    \
@@ -433,8 +426,9 @@ static int config_input(AVFilterLink *inlink)
         }
     }
 
-    if (ARCH_X86)
-        ff_atadenoise_init_x86(&s->dsp, depth, s->algorithm, s->sigma);
+#if ARCH_X86
+    ff_atadenoise_init_x86(&s->dsp, depth, s->algorithm, s->sigma);
+#endif
 
     return 0;
 }

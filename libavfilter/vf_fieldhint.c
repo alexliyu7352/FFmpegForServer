@@ -19,11 +19,13 @@
  */
 
 #include "libavutil/avassert.h"
+#include "libavutil/file_open.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
+#include "formats.h"
 #include "internal.h"
 #include "video.h"
 
@@ -73,7 +75,7 @@ static av_cold int init(AVFilterContext *ctx)
         av_log(ctx, AV_LOG_ERROR, "Hint file must be set.\n");
         return AVERROR(EINVAL);
     }
-    s->hint = av_fopen_utf8(s->hint_file_str, "r");
+    s->hint = avpriv_fopen_utf8(s->hint_file_str, "r");
     if (!s->hint) {
         ret = AVERROR(errno);
         av_log(ctx, AV_LOG_ERROR, "%s: %s\n", s->hint_file_str, av_err2str(ret));
@@ -216,10 +218,20 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     switch (hint) {
     case '+':
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
         out->interlaced_frame = 1;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+        out->flags |= AV_FRAME_FLAG_INTERLACED;
         break;
     case '-':
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
         out->interlaced_frame = 0;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+        out->flags &= ~AV_FRAME_FLAG_INTERLACED;
         break;
     case '=':
         break;

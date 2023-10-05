@@ -23,8 +23,8 @@
 
 #include "avcodec.h"
 #include "bytestream.h"
+#include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "mathops.h"
 
 #define ROQ_FRAME_SIZE           735
@@ -174,7 +174,7 @@ static int roq_dpcm_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
 
     /* Write the actual samples */
     for (i = 0; i < data_size; i++)
-        *out++ = dpcm_predict(&context->lastSample[i & 1], *in++);
+        *out++ = dpcm_predict(&context->lastSample[(i & 1) & stereo], *in++);
 
     avpkt->pts      = context->input_frames <= 7 ? context->first_pts : frame->pts;
     avpkt->duration = data_size / channels;
@@ -187,17 +187,16 @@ static int roq_dpcm_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     return 0;
 }
 
-const AVCodec ff_roq_dpcm_encoder = {
-    .name           = "roq_dpcm",
-    .long_name      = NULL_IF_CONFIG_SMALL("id RoQ DPCM"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_ROQ_DPCM,
-    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
+const FFCodec ff_roq_dpcm_encoder = {
+    .p.name         = "roq_dpcm",
+    CODEC_LONG_NAME("id RoQ DPCM"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_ROQ_DPCM,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
     .priv_data_size = sizeof(ROQDPCMContext),
     .init           = roq_dpcm_encode_init,
-    .encode2        = roq_dpcm_encode_frame,
+    FF_CODEC_ENCODE_CB(roq_dpcm_encode_frame),
     .close          = roq_dpcm_encode_close,
-    .sample_fmts    = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16,
+    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16,
                                                      AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

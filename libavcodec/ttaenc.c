@@ -22,9 +22,9 @@
 #include "ttadata.h"
 #include "ttaencdsp.h"
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "encode.h"
 #include "put_bits.h"
-#include "internal.h"
 #include "libavutil/crc.h"
 
 typedef struct TTAEncContext {
@@ -187,9 +187,7 @@ pkt_alloc:
     put_bits32(&pb, av_crc(s->crc_table, UINT32_MAX, avpkt->data, out_bytes) ^ UINT32_MAX);
     flush_put_bits(&pb);
 
-    avpkt->pts      = frame->pts;
     avpkt->size     = out_bytes + 4;
-    avpkt->duration = ff_samples_to_time_base(avctx, frame->nb_samples);
     *got_packet_ptr = 1;
     return 0;
 }
@@ -201,19 +199,19 @@ static av_cold int tta_encode_close(AVCodecContext *avctx)
     return 0;
 }
 
-const AVCodec ff_tta_encoder = {
-    .name           = "tta",
-    .long_name      = NULL_IF_CONFIG_SMALL("TTA (True Audio)"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_TTA,
+const FFCodec ff_tta_encoder = {
+    .p.name         = "tta",
+    CODEC_LONG_NAME("TTA (True Audio)"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_TTA,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(TTAEncContext),
     .init           = tta_encode_init,
     .close          = tta_encode_close,
-    .encode2        = tta_encode_frame,
-    .capabilities   = AV_CODEC_CAP_SMALL_LAST_FRAME,
-    .sample_fmts    = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_U8,
+    FF_CODEC_ENCODE_CB(tta_encode_frame),
+    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_U8,
                                                      AV_SAMPLE_FMT_S16,
                                                      AV_SAMPLE_FMT_S32,
                                                      AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };

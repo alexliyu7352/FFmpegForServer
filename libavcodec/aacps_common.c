@@ -78,7 +78,7 @@ static int read_ ## PAR ## _data(AVCodecContext *avctx, GetBitContext *gb, PSCom
                         int8_t (*PAR)[PS_MAX_NR_IIDICC], int table_idx, int e, int dt) \
 { \
     int b, num = ps->nr_ ## PAR ## _par; \
-    VLC_TYPE (*vlc_table)[2] = vlc_ps[table_idx].table; \
+    const VLCElem *vlc_table = vlc_ps[table_idx].table; \
     if (dt) { \
         int e_prev = e ? e - 1 : ps->num_env_old - 1; \
         e_prev = FFMAX(e_prev, 0); \
@@ -290,7 +290,7 @@ err:
 }
 
 #define PS_INIT_VLC_STATIC(num, nb_bits, size)                          \
-    INIT_VLC_STATIC(&vlc_ps[num], nb_bits, ps_tmp[num].table_size / ps_tmp[num].elem_size,    \
+    VLC_INIT_STATIC(&vlc_ps[num], nb_bits, ps_tmp[num].table_size / ps_tmp[num].elem_size,    \
                     ps_tmp[num].ps_bits, 1, 1,                                          \
                     ps_tmp[num].ps_codes, ps_tmp[num].elem_size, ps_tmp[num].elem_size, \
                     size);

@@ -33,6 +33,8 @@
 #include "mpeg4audio.h"
 #include "bgmc.h"
 #include "bswapdsp.h"
+#include "codec_internal.h"
+#include "decode.h"
 #include "internal.h"
 #include "mlz.h"
 #include "libavutil/samplefmt.h"
@@ -359,6 +361,9 @@ static av_cold int read_specific_config(ALSDecContext *ctx)
         avpriv_request_sample(avctx, "Huge number of channels");
         return AVERROR_PATCHWELCOME;
     }
+
+    if (avctx->ch_layout.nb_channels == 0)
+        return AVERROR_INVALIDDATA;
 
     ctx->cur_frame_length = sconf->frame_length;
 
@@ -1023,7 +1028,7 @@ static int read_block(ALSDecContext *ctx, ALSBlockData *bd)
 
     *bd->shift_lsbs = 0;
 
-    if (get_bits_left(gb) < 1)
+    if (get_bits_left(gb) < 7)
         return AVERROR_INVALIDDATA;
 
     // read block type flag and read the samples accordingly
@@ -1655,7 +1660,8 @@ static int read_frame_data(ALSDecContext *ctx, unsigned int ra_frame)
 
     if (!sconf->mc_coding || ctx->js_switch) {
         int independent_bs = !sconf->joint_stereo;
-
+        if (get_bits_left(gb) < 7*channels*ctx->num_blocks)
+            return AVERROR_INVALIDDATA;
         for (c = 0; c < channels; c++) {
             js_blocks[0] = 0;
             js_blocks[1] = 0;
@@ -1790,11 +1796,10 @@ static int read_frame_data(ALSDecContext *ctx, unsigned int ra_frame)
 
 /** Decode an ALS frame.
  */
-static int decode_frame(AVCodecContext *avctx, void *data, int *got_frame_ptr,
-                        AVPacket *avpkt)
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
+                        int *got_frame_ptr, AVPacket *avpkt)
 {
     ALSDecContext *ctx       = avctx->priv_data;
-    AVFrame *frame           = data;
     ALSSpecificConfig *sconf = &ctx->sconf;
     const uint8_t *buffer    = avpkt->data;
     int buffer_size          = avpkt->size;
@@ -1986,7 +1991,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     unsigned int c;
     unsigned int channel_size;
     int num_buffers, ret;
-    int channels = avctx->ch_layout.nb_channels;
+    int channels;
     ALSDecContext *ctx = avctx->priv_data;
     ALSSpecificConfig *sconf = &ctx->sconf;
     ctx->avctx = avctx;
@@ -2000,6 +2005,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_ERROR, "Reading ALSSpecificConfig failed.\n");
         return ret;
     }
+    channels = avctx->ch_layout.nb_channels;
 
     if ((ret = check_specific_config(ctx)) < 0) {
         return ret;
@@ -2174,16 +2180,20 @@ static av_cold void flush(AVCodecContext *avctx)
 }
 
 
-const AVCodec ff_als_decoder = {
-    .name           = "als",
-    .long_name      = NULL_IF_CONFIG_SMALL("MPEG-4 Audio Lossless Coding (ALS)"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_MP4ALS,
+const FFCodec ff_als_decoder = {
+    .p.name         = "als",
+    CODEC_LONG_NAME("MPEG-4 Audio Lossless Coding (ALS)"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_MP4ALS,
     .priv_data_size = sizeof(ALSDecContext),
     .init           = decode_init,
     .close          = decode_end,
-    .decode         = decode_frame,
+    FF_CODEC_DECODE_CB(decode_frame),
     .flush          = flush,
-    .capabilities   = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .p.capabilities =
+#if FF_API_SUBFRAMES
+                      AV_CODEC_CAP_SUBFRAMES |
+#endif
+                      AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

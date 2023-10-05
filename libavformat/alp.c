@@ -25,6 +25,7 @@
 #include "libavutil/channel_layout.h"
 #include "avformat.h"
 #include "internal.h"
+#include "mux.h"
 #include "rawenc.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/internal.h"
@@ -122,7 +123,7 @@ static int alp_read_header(AVFormatContext *s)
     par->format                 = AV_SAMPLE_FMT_S16;
     par->sample_rate            = hdr->sample_rate;
 
-    if (hdr->num_channels > 2)
+    if (hdr->num_channels > 2 || hdr->num_channels == 0)
         return AVERROR_INVALIDDATA;
 
     av_channel_layout_default(&par->ch_layout, hdr->num_channels);
@@ -290,16 +291,16 @@ static const AVClass alp_muxer_class = {
     .version    = LIBAVUTIL_VERSION_INT
 };
 
-const AVOutputFormat ff_alp_muxer = {
-    .name           = "alp",
-    .long_name      = NULL_IF_CONFIG_SMALL("LEGO Racers ALP"),
-    .extensions     = "tun,pcm",
-    .audio_codec    = AV_CODEC_ID_ADPCM_IMA_ALP,
-    .video_codec    = AV_CODEC_ID_NONE,
+const FFOutputFormat ff_alp_muxer = {
+    .p.name         = "alp",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("LEGO Racers ALP"),
+    .p.extensions   = "tun,pcm",
+    .p.audio_codec  = AV_CODEC_ID_ADPCM_IMA_ALP,
+    .p.video_codec  = AV_CODEC_ID_NONE,
+    .p.priv_class   = &alp_muxer_class,
     .init           = alp_write_init,
     .write_header   = alp_write_header,
     .write_packet   = ff_raw_write_packet,
-    .priv_class     = &alp_muxer_class,
     .priv_data_size = sizeof(ALPMuxContext)
 };
 #endif

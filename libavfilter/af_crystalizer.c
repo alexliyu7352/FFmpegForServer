@@ -22,7 +22,6 @@
 #include "libavutil/opt.h"
 #include "avfilter.h"
 #include "audio.h"
-#include "formats.h"
 
 typedef struct CrystalizerContext {
     const AVClass *class;
@@ -224,31 +223,12 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_frame_free(&s->prev);
 }
 
-static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
-                           char *res, int res_len, int flags)
-{
-    int ret;
-
-    ret = ff_filter_process_command(ctx, cmd, args, res, res_len, flags);
-    if (ret < 0)
-        return ret;
-
-    return config_input(ctx->inputs[0]);
-}
-
 static const AVFilterPad inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_AUDIO,
         .filter_frame = filter_frame,
         .config_props = config_input,
-    },
-};
-
-static const AVFilterPad outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_AUDIO,
     },
 };
 
@@ -259,10 +239,10 @@ const AVFilter ff_af_crystalizer = {
     .priv_class     = &crystalizer_class,
     .uninit         = uninit,
     FILTER_INPUTS(inputs),
-    FILTER_OUTPUTS(outputs),
+    FILTER_OUTPUTS(ff_audio_default_filterpad),
     FILTER_SAMPLEFMTS(AV_SAMPLE_FMT_FLT, AV_SAMPLE_FMT_FLTP,
                       AV_SAMPLE_FMT_DBL, AV_SAMPLE_FMT_DBLP),
-    .process_command = process_command,
+    .process_command = ff_filter_process_command,
     .flags          = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL |
                       AVFILTER_FLAG_SLICE_THREADS,
 };

@@ -29,7 +29,8 @@
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
 #include "avcodec.h"
-#include "internal.h"
+#include "codec_internal.h"
+#include "decode.h"
 #include "get_bits.h"
 #include "evrcdata.h"
 #include "acelp_vectors.h"
@@ -220,8 +221,8 @@ static evrc_packet_rate determine_bitrate(AVCodecContext *avctx,
 static void warn_insufficient_frame_quality(AVCodecContext *avctx,
                                             const char *message)
 {
-    av_log(avctx, AV_LOG_WARNING, "Frame #%d, %s\n",
-           avctx->frame_number, message);
+    av_log(avctx, AV_LOG_WARNING, "Frame #%"PRId64", %s\n",
+           avctx->frame_num, message);
 }
 
 /**
@@ -740,11 +741,10 @@ static void frame_erasure(EVRCContext *e, float *samples)
     }
 }
 
-static int evrc_decode_frame(AVCodecContext *avctx, void *data,
+static int evrc_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                              int *got_frame_ptr, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
-    AVFrame *frame     = data;
     EVRCContext *e     = avctx->priv_data;
     int buf_size       = avpkt->size;
     float ilspf[FILTER_ORDER], ilpc[FILTER_ORDER], idelay[NB_SUBFRAMES];
@@ -929,15 +929,14 @@ static const AVClass evrcdec_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVCodec ff_evrc_decoder = {
-    .name           = "evrc",
-    .long_name      = NULL_IF_CONFIG_SMALL("EVRC (Enhanced Variable Rate Codec)"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_EVRC,
+const FFCodec ff_evrc_decoder = {
+    .p.name         = "evrc",
+    CODEC_LONG_NAME("EVRC (Enhanced Variable Rate Codec)"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_EVRC,
     .init           = evrc_decode_init,
-    .decode         = evrc_decode_frame,
-    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
+    FF_CODEC_DECODE_CB(evrc_decode_frame),
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
     .priv_data_size = sizeof(EVRCContext),
-    .priv_class     = &evrcdec_class,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    .p.priv_class   = &evrcdec_class,
 };

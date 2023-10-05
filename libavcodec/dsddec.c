@@ -28,6 +28,8 @@
 
 #include "libavcodec/internal.h"
 #include "avcodec.h"
+#include "codec_internal.h"
+#include "decode.h"
 #include "dsd.h"
 
 #define DSD_SILENCE 0x69
@@ -94,11 +96,10 @@ static int dsd_channel(AVCodecContext *avctx, void *tdata, int j, int threadnr)
     return 0;
 }
 
-static int decode_frame(AVCodecContext *avctx, void *data,
+static int decode_frame(AVCodecContext *avctx, AVFrame *frame,
                         int *got_frame_ptr, AVPacket *avpkt)
 {
     ThreadData td;
-    AVFrame *frame = data;
     int ret;
 
     frame->nb_samples = avpkt->size / avctx->ch_layout.nb_channels;
@@ -115,17 +116,16 @@ static int decode_frame(AVCodecContext *avctx, void *data,
 }
 
 #define DSD_DECODER(id_, name_, long_name_) \
-const AVCodec ff_ ## name_ ## _decoder = { \
-    .name         = #name_, \
-    .long_name    = NULL_IF_CONFIG_SMALL(long_name_), \
-    .type         = AVMEDIA_TYPE_AUDIO, \
-    .id           = AV_CODEC_ID_##id_, \
+const FFCodec ff_ ## name_ ## _decoder = { \
+    .p.name       = #name_, \
+    CODEC_LONG_NAME(long_name_), \
+    .p.type       = AVMEDIA_TYPE_AUDIO, \
+    .p.id         = AV_CODEC_ID_##id_, \
     .init         = decode_init, \
-    .decode       = decode_frame, \
-    .capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SLICE_THREADS, \
-    .sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_FLTP, \
+    FF_CODEC_DECODE_CB(decode_frame), \
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SLICE_THREADS, \
+    .p.sample_fmts = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_FLTP, \
                                                    AV_SAMPLE_FMT_NONE }, \
-    .caps_internal = FF_CODEC_CAP_INIT_THREADSAFE, \
 };
 
 DSD_DECODER(DSD_LSBF, dsd_lsbf, "DSD (Direct Stream Digital), least significant bit first")

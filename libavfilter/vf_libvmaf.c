@@ -24,6 +24,8 @@
  * Calculate the VMAF between two input videos.
  */
 
+#include "config_components.h"
+
 #include <libvmaf.h>
 
 #include "libavutil/avstring.h"
@@ -35,6 +37,13 @@
 #include "framesync.h"
 #include "internal.h"
 #include "video.h"
+
+#if CONFIG_LIBVMAF_CUDA_FILTER
+#include <libvmaf_cuda.h>
+
+#include "libavutil/hwcontext.h"
+#include "libavutil/hwcontext_cuda_internal.h"
+#endif
 
 typedef struct LIBVMAFContext {
     const AVClass *class;
@@ -58,6 +67,9 @@ typedef struct LIBVMAFContext {
     unsigned model_cnt;
     unsigned frame_cnt;
     unsigned bpc;
+#if CONFIG_LIBVMAF_CUDA_FILTER
+    VmafCudaState *cu_state;
+#endif
 } LIBVMAFContext;
 
 #define OFFSET(x) offsetof(LIBVMAFContext, x)
@@ -70,8 +82,8 @@ static const AVOption libvmaf_options[] = {
     {"enable_transform",  "use model='enable_transform=true'.",                         OFFSET(enable_transform), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS|AV_OPT_FLAG_DEPRECATED},
     {"phone_model",  "use model='enable_transform=true'.",                              OFFSET(phone_model), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS|AV_OPT_FLAG_DEPRECATED},
     {"psnr",  "use feature='name=psnr'.",                                               OFFSET(psnr), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS|AV_OPT_FLAG_DEPRECATED},
-    {"ssim",  "use feature='name=ssim'.",                                               OFFSET(ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS|AV_OPT_FLAG_DEPRECATED},
-    {"ms_ssim",  "use feature='name=ms_ssim'.",                                         OFFSET(ms_ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS|AV_OPT_FLAG_DEPRECATED},
+    {"ssim",  "use feature='name=float_ssim'.",                                         OFFSET(ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS|AV_OPT_FLAG_DEPRECATED},
+    {"ms_ssim",  "use feature='name=float_ms_ssim'.",                                   OFFSET(ms_ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS|AV_OPT_FLAG_DEPRECATED},
     {"pool",  "Set the pool method to be used for computing vmaf.",                     OFFSET(pool), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     {"n_threads", "Set number of threads to be used when computing vmaf.",              OFFSET(n_threads), AV_OPT_TYPE_INT, {.i64=0}, 0, UINT_MAX, FLAGS},
     {"n_subsample", "Set interval for frame subsampling used when computing vmaf.",     OFFSET(n_subsample), AV_OPT_TYPE_INT, {.i64=1}, 1, UINT_MAX, FLAGS},
@@ -108,6 +120,7 @@ static enum VmafPixelFormat pix_fmt_map(enum AVPixelFormat av_pix_fmt)
 
 static int copy_picture_data(AVFrame *src, VmafPicture *dst, unsigned bpc)
 {
+    const int bytes_per_value = bpc > 8 ? 2 : 1;
     int err = vmaf_picture_alloc(dst, pix_fmt_map(src->format), bpc,
                                  src->width, src->height);
     if (err)
@@ -117,7 +130,7 @@ static int copy_picture_data(AVFrame *src, VmafPicture *dst, unsigned bpc)
         uint8_t *src_data = src->data[i];
         uint8_t *dst_data = dst->data[i];
         for (unsigned j = 0; j < dst->h[i]; j++) {
-            memcpy(dst_data, src_data, sizeof(*dst_data) * dst->w[i]);
+            memcpy(dst_data, src_data, bytes_per_value * dst->w[i]);
             src_data += src->linesize[i];
             dst_data += dst->stride[i];
         }
@@ -139,6 +152,13 @@ static int do_vmaf(FFFrameSync *fs)
         return ret;
     if (ctx->is_disabled || !ref)
         return ff_filter_frame(ctx->outputs[0], dist);
+
+    if (dist->color_range != ref->color_range) {
+        av_log(ctx, AV_LOG_WARNING, "distorted and reference "
+               "frames use different color ranges (%s != %s)\n",
+               av_color_range_name(dist->color_range),
+               av_color_range_name(ref->color_range));
+    }
 
     err = copy_picture_data(ref, &pic_ref, s->bpc);
     if (err) {
@@ -235,9 +255,9 @@ static int parse_features(AVFilterContext *ctx)
     for (unsigned i = 0; i < dict_cnt; i++) {
         char *feature_name = NULL;
         VmafFeatureDictionary *feature_opts_dict = NULL;
-        AVDictionaryEntry *e = NULL;
+        const AVDictionaryEntry *e = NULL;
 
-        while (e = av_dict_get(dict[i], "", e, AV_DICT_IGNORE_SUFFIX)) {
+        while (e = av_dict_iterate(dict[i], e)) {
             if (av_stristr(e->key, "name")) {
                 feature_name = e->value;
                 continue;
@@ -294,11 +314,11 @@ static int parse_models(AVFilterContext *ctx)
 
     for (unsigned i = 0; i < dict_cnt; i++) {
         VmafModelConfig model_cfg = { 0 };
-        AVDictionaryEntry *e = NULL;
+        const AVDictionaryEntry *e = NULL;
         char *version = NULL;
         char  *path = NULL;
 
-        while (e = av_dict_get(dict[i], "", e, AV_DICT_IGNORE_SUFFIX)) {
+        while (e = av_dict_iterate(dict[i], e)) {
             if (av_stristr(e->key, "disable_clip")) {
                 model_cfg.flags |= av_stristr(e->value, "true") ?
                     VMAF_MODEL_FLAG_DISABLE_CLIP : 0;
@@ -354,7 +374,7 @@ static int parse_models(AVFilterContext *ctx)
             goto exit;
         }
 
-        while (e = av_dict_get(dict[i], "", e, AV_DICT_IGNORE_SUFFIX)) {
+        while (e = av_dict_iterate(dict[i], e)) {
             VmafFeatureDictionary *feature_opts_dict = NULL;
             char *feature_opt = NULL;
 
@@ -709,3 +729,201 @@ const AVFilter ff_vf_libvmaf = {
     FILTER_OUTPUTS(libvmaf_outputs),
     FILTER_PIXFMTS_ARRAY(pix_fmts),
 };
+
+#if CONFIG_LIBVMAF_CUDA_FILTER
+static const enum AVPixelFormat supported_formats[] = {
+    AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_YUV444P16,
+};
+
+static int format_is_supported(enum AVPixelFormat fmt)
+{
+    int i;
+
+    for (i = 0; i < FF_ARRAY_ELEMS(supported_formats); i++)
+        if (supported_formats[i] == fmt)
+            return 1;
+    return 0;
+}
+
+static int config_props_cuda(AVFilterLink *outlink)
+{
+    int err;
+    AVFilterContext *ctx = outlink->src;
+    LIBVMAFContext *s = ctx->priv;
+    AVFilterLink *inlink = ctx->inputs[0];
+    AVHWFramesContext *frames_ctx = (AVHWFramesContext*) inlink->hw_frames_ctx->data;
+    AVCUDADeviceContext *device_hwctx = frames_ctx->device_ctx->hwctx;
+    CUcontext cu_ctx = device_hwctx->cuda_ctx;
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frames_ctx->sw_format);
+
+    VmafConfiguration cfg = {
+        .log_level = log_level_map(av_log_get_level()),
+        .n_subsample = s->n_subsample,
+        .n_threads = s->n_threads,
+    };
+
+    VmafCudaPictureConfiguration cuda_pic_cfg = {
+        .pic_params = {
+            .bpc = desc->comp[0].depth,
+            .w = inlink->w,
+            .h = inlink->h,
+            .pix_fmt = pix_fmt_map(frames_ctx->sw_format),
+        },
+        .pic_prealloc_method = VMAF_CUDA_PICTURE_PREALLOCATION_METHOD_DEVICE,
+    };
+
+    VmafCudaConfiguration cuda_cfg = {
+        .cu_ctx = cu_ctx,
+    };
+
+    if (!format_is_supported(frames_ctx->sw_format)) {
+        av_log(s, AV_LOG_ERROR,
+               "Unsupported input format: %s\n", desc->name);
+        return AVERROR(EINVAL);
+    }
+
+    err = vmaf_init(&s->vmaf, cfg);
+    if (err)
+        return AVERROR(EINVAL);
+
+    err = vmaf_cuda_state_init(&s->cu_state, cuda_cfg);
+    if (err)
+        return AVERROR(EINVAL);
+
+    err = vmaf_cuda_import_state(s->vmaf, s->cu_state);
+    if (err)
+        return AVERROR(EINVAL);
+
+    err = vmaf_cuda_preallocate_pictures(s->vmaf, cuda_pic_cfg);
+    if (err < 0)
+        return err;
+
+    err = parse_deprecated_options(ctx);
+    if (err)
+        return err;
+
+    err = parse_models(ctx);
+    if (err)
+        return err;
+
+    err = parse_features(ctx);
+    if (err)
+        return err;
+
+    return config_output(outlink);
+}
+
+static int copy_picture_data_cuda(VmafContext* vmaf,
+                                  AVCUDADeviceContext* device_hwctx,
+                                  AVFrame* src, VmafPicture* dst,
+                                  enum AVPixelFormat pix_fmt)
+{
+    const AVPixFmtDescriptor *pix_desc = av_pix_fmt_desc_get(pix_fmt);
+    CudaFunctions *cu = device_hwctx->internal->cuda_dl;
+
+    CUDA_MEMCPY2D m = {
+        .srcMemoryType = CU_MEMORYTYPE_DEVICE,
+        .dstMemoryType = CU_MEMORYTYPE_DEVICE,
+    };
+
+    int err = vmaf_cuda_fetch_preallocated_picture(vmaf, dst);
+    if (err)
+        return AVERROR(ENOMEM);
+
+    err = cu->cuCtxPushCurrent(device_hwctx->cuda_ctx);
+    if (err)
+        return AVERROR_EXTERNAL;
+
+    for (unsigned i = 0; i < pix_desc->nb_components; i++) {
+        m.srcDevice = (CUdeviceptr) src->data[i];
+        m.srcPitch = src->linesize[i];
+        m.dstDevice = (CUdeviceptr) dst->data[i];
+        m.dstPitch = dst->stride[i];
+        m.WidthInBytes = dst->w[i] * ((dst->bpc + 7) / 8);
+        m.Height = dst->h[i];
+
+        err = cu->cuMemcpy2D(&m);
+        if (err)
+            return AVERROR_EXTERNAL;
+        break;
+    }
+
+    err = cu->cuCtxPopCurrent(NULL);
+    if (err)
+        return AVERROR_EXTERNAL;
+
+    return 0;
+}
+
+static int do_vmaf_cuda(FFFrameSync* fs)
+{
+    AVFilterContext* ctx = fs->parent;
+    LIBVMAFContext* s = ctx->priv;
+    AVFilterLink *inlink = ctx->inputs[0];
+    AVHWFramesContext *frames_ctx = (AVHWFramesContext*) inlink->hw_frames_ctx->data;
+    AVCUDADeviceContext *device_hwctx = frames_ctx->device_ctx->hwctx;
+    VmafPicture pic_ref, pic_dist;
+    AVFrame *ref, *dist;
+
+    int err = 0;
+
+    err = ff_framesync_dualinput_get(fs, &dist, &ref);
+    if (err < 0)
+        return err;
+    if (ctx->is_disabled || !ref)
+        return ff_filter_frame(ctx->outputs[0], dist);
+
+    err = copy_picture_data_cuda(s->vmaf, device_hwctx, ref, &pic_ref,
+                                 frames_ctx->sw_format);
+    if (err) {
+        av_log(s, AV_LOG_ERROR, "problem during copy_picture_data_cuda.\n");
+        return AVERROR(ENOMEM);
+    }
+
+    err = copy_picture_data_cuda(s->vmaf, device_hwctx, dist, &pic_dist,
+                                 frames_ctx->sw_format);
+    if (err) {
+        av_log(s, AV_LOG_ERROR, "problem during copy_picture_data_cuda.\n");
+        return AVERROR(ENOMEM);
+    }
+
+    err = vmaf_read_pictures(s->vmaf, &pic_ref, &pic_dist, s->frame_cnt++);
+    if (err) {
+        av_log(s, AV_LOG_ERROR, "problem during vmaf_read_pictures.\n");
+        return AVERROR(EINVAL);
+    }
+
+    return ff_filter_frame(ctx->outputs[0], dist);
+}
+
+static av_cold int init_cuda(AVFilterContext *ctx)
+{
+    LIBVMAFContext *s = ctx->priv;
+    s->fs.on_event = do_vmaf_cuda;
+    return 0;
+}
+
+static const AVFilterPad libvmaf_outputs_cuda[] = {
+    {
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_VIDEO,
+        .config_props = config_props_cuda,
+    },
+};
+
+const AVFilter ff_vf_libvmaf_cuda = {
+    .name           = "libvmaf_cuda",
+    .description    = NULL_IF_CONFIG_SMALL("Calculate the VMAF between two video streams."),
+    .preinit        = libvmaf_framesync_preinit,
+    .init           = init_cuda,
+    .uninit         = uninit,
+    .activate       = activate,
+    .priv_size      = sizeof(LIBVMAFContext),
+    .priv_class     = &libvmaf_class,
+    FILTER_INPUTS(libvmaf_inputs),
+    FILTER_OUTPUTS(libvmaf_outputs_cuda),
+    FILTER_SINGLE_PIXFMT(AV_PIX_FMT_CUDA),
+    .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
+};
+#endif

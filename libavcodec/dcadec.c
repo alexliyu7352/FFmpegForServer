@@ -22,10 +22,10 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/thread.h"
 
+#include "codec_internal.h"
 #include "dcadec.h"
 #include "dcahuff.h"
 #include "dca_syncwords.h"
-#include "internal.h"
 #include "profiles.h"
 
 #define MIN_PACKET_SIZE     16
@@ -147,12 +147,11 @@ void ff_dca_downmix_to_stereo_float(AVFloatDSPContext *fdsp, float **samples,
     }
 }
 
-static int dcadec_decode_frame(AVCodecContext *avctx, void *data,
+static int dcadec_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                                int *got_frame_ptr, AVPacket *avpkt)
 {
     DCAContext *s = avctx->priv_data;
-    AVFrame *frame = data;
-    uint8_t *input = avpkt->data;
+    const uint8_t *input = avpkt->data;
     int input_size = avpkt->size;
     int i, ret, prev_packet = s->packet;
     uint32_t mrk;
@@ -218,11 +217,10 @@ static int dcadec_decode_frame(AVCodecContext *avctx, void *data,
         if (asset && (asset->extension_mask & DCA_EXSS_XLL)) {
             if ((ret = ff_dca_xll_parse(&s->xll, input, asset)) < 0) {
                 // Conceal XLL synchronization error
-                if (ret == AVERROR(EAGAIN)
-                    && (prev_packet & DCA_PACKET_XLL)
-                    && (s->packet & DCA_PACKET_CORE))
-                    s->packet |= DCA_PACKET_XLL | DCA_PACKET_RECOVERY;
-                else if (ret == AVERROR(ENOMEM) || (avctx->err_recognition & AV_EF_EXPLODE))
+                if (ret == AVERROR(EAGAIN)) {
+                    if ((prev_packet & DCA_PACKET_XLL) && (s->packet & DCA_PACKET_CORE))
+                        s->packet |= DCA_PACKET_XLL | DCA_PACKET_RECOVERY;
+                } else if (ret == AVERROR(ENOMEM) || (avctx->err_recognition & AV_EF_EXPLODE))
                     return ret;
             } else {
                 s->packet |= DCA_PACKET_XLL;
@@ -411,20 +409,20 @@ static const AVClass dcadec_class = {
     .category   = AV_CLASS_CATEGORY_DECODER,
 };
 
-const AVCodec ff_dca_decoder = {
-    .name           = "dca",
-    .long_name      = NULL_IF_CONFIG_SMALL("DCA (DTS Coherent Acoustics)"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_DTS,
+const FFCodec ff_dca_decoder = {
+    .p.name         = "dca",
+    CODEC_LONG_NAME("DCA (DTS Coherent Acoustics)"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_DTS,
     .priv_data_size = sizeof(DCAContext),
     .init           = dcadec_init,
-    .decode         = dcadec_decode_frame,
+    FF_CODEC_DECODE_CB(dcadec_decode_frame),
     .close          = dcadec_close,
     .flush          = dcadec_flush,
-    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
-    .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P, AV_SAMPLE_FMT_S32P,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_CHANNEL_CONF,
+    .p.sample_fmts  = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P, AV_SAMPLE_FMT_S32P,
                                                       AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_NONE },
-    .priv_class     = &dcadec_class,
-    .profiles       = NULL_IF_CONFIG_SMALL(ff_dca_profiles),
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+    .p.priv_class   = &dcadec_class,
+    .p.profiles     = NULL_IF_CONFIG_SMALL(ff_dca_profiles),
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };

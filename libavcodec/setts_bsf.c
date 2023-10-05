@@ -244,6 +244,8 @@ static void setts_close(AVBSFContext *bsf)
     s->pts_expr = NULL;
     av_expr_free(s->dts_expr);
     s->dts_expr = NULL;
+    av_expr_free(s->duration_expr);
+    s->duration_expr = NULL;
 }
 
 #define OFFSET(x) offsetof(SetTSContext, x)
@@ -265,10 +267,10 @@ static const AVClass setts_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVBitStreamFilter ff_setts_bsf = {
-    .name           = "setts",
+const FFBitStreamFilter ff_setts_bsf = {
+    .p.name         = "setts",
+    .p.priv_class   = &setts_class,
     .priv_data_size = sizeof(SetTSContext),
-    .priv_class     = &setts_class,
     .init           = setts_init,
     .close          = setts_close,
     .filter         = setts_filter,

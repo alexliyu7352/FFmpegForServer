@@ -44,6 +44,8 @@ static int trace_headers_init(AVBSFContext *bsf)
 
     ctx->cbc->trace_enable = 1;
     ctx->cbc->trace_level  = AV_LOG_INFO;
+    ctx->cbc->trace_context = ctx->cbc;
+    ctx->cbc->trace_read_callback = ff_cbs_trace_read_log;
 
     if (bsf->par_in->extradata) {
         CodedBitstreamFragment *frag = &ctx->fragment;
@@ -117,11 +119,11 @@ static int trace_headers(AVBSFContext *bsf, AVPacket *pkt)
     return err;
 }
 
-const AVBitStreamFilter ff_trace_headers_bsf = {
-    .name           = "trace_headers",
+const FFBitStreamFilter ff_trace_headers_bsf = {
+    .p.name         = "trace_headers",
+    .p.codec_ids    = ff_cbs_all_codec_ids,
     .priv_data_size = sizeof(TraceHeadersContext),
     .init           = &trace_headers_init,
     .close          = &trace_headers_close,
     .filter         = &trace_headers,
-    .codec_ids      = ff_cbs_all_codec_ids,
 };

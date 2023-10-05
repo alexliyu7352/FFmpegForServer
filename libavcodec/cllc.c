@@ -27,7 +27,7 @@
 #include "canopus.h"
 #include "get_bits.h"
 #include "avcodec.h"
-#include "internal.h"
+#include "codec_internal.h"
 #include "thread.h"
 
 #define VLC_BITS 7
@@ -77,7 +77,7 @@ static int read_code_table(CLLCContext *ctx, GetBitContext *gb, VLC *vlc)
         }
     }
 
-    return ff_init_vlc_from_lengths(vlc, VLC_BITS, count, bits, 1,
+    return ff_vlc_init_from_lengths(vlc, VLC_BITS, count, bits, 1,
                                     symbols, 1, 1, 0, 0, ctx->avctx);
 }
 
@@ -235,7 +235,7 @@ static int decode_argb_frame(CLLCContext *ctx, GetBitContext *gb, AVFrame *pic)
         ret = read_code_table(ctx, gb, &vlc[i]);
         if (ret < 0) {
             for (j = 0; j < i; j++)
-                ff_free_vlc(&vlc[j]);
+                ff_vlc_free(&vlc[j]);
 
             av_log(ctx->avctx, AV_LOG_ERROR,
                    "Could not read code table %d.\n", i);
@@ -251,7 +251,7 @@ static int decode_argb_frame(CLLCContext *ctx, GetBitContext *gb, AVFrame *pic)
     }
 
     for (i = 0; i < 4; i++)
-        ff_free_vlc(&vlc[i]);
+        ff_vlc_free(&vlc[i]);
 
     return 0;
 }
@@ -278,7 +278,7 @@ static int decode_rgb24_frame(CLLCContext *ctx, GetBitContext *gb, AVFrame *pic)
         ret = read_code_table(ctx, gb, &vlc[i]);
         if (ret < 0) {
             for (j = 0; j < i; j++)
-                ff_free_vlc(&vlc[j]);
+                ff_vlc_free(&vlc[j]);
 
             av_log(ctx->avctx, AV_LOG_ERROR,
                    "Could not read code table %d.\n", i);
@@ -295,7 +295,7 @@ static int decode_rgb24_frame(CLLCContext *ctx, GetBitContext *gb, AVFrame *pic)
     }
 
     for (i = 0; i < 3; i++)
-        ff_free_vlc(&vlc[i]);
+        ff_vlc_free(&vlc[i]);
 
     return 0;
 }
@@ -331,7 +331,7 @@ static int decode_yuv_frame(CLLCContext *ctx, GetBitContext *gb, AVFrame *pic)
         ret = read_code_table(ctx, gb, &vlc[i]);
         if (ret < 0) {
             for (j = 0; j < i; j++)
-                ff_free_vlc(&vlc[j]);
+                ff_vlc_free(&vlc[j]);
 
             av_log(ctx->avctx, AV_LOG_ERROR,
                    "Could not read code table %d.\n", i);
@@ -350,17 +350,16 @@ static int decode_yuv_frame(CLLCContext *ctx, GetBitContext *gb, AVFrame *pic)
     }
 
     for (i = 0; i < 2; i++)
-        ff_free_vlc(&vlc[i]);
+        ff_vlc_free(&vlc[i]);
 
     return 0;
 }
 
-static int cllc_decode_frame(AVCodecContext *avctx, void *data,
+static int cllc_decode_frame(AVCodecContext *avctx, AVFrame *pic,
                              int *got_picture_ptr, AVPacket *avpkt)
 {
     CLLCContext *ctx = avctx->priv_data;
-    AVFrame *pic = data;
-    uint8_t *src = avpkt->data;
+    const uint8_t *src = avpkt->data;
     uint32_t info_tag, info_offset;
     int data_size;
     GetBitContext gb;
@@ -461,7 +460,7 @@ static int cllc_decode_frame(AVCodecContext *avctx, void *data,
         return AVERROR_INVALIDDATA;
     }
 
-    pic->key_frame = 1;
+    pic->flags |= AV_FRAME_FLAG_KEY;
     pic->pict_type = AV_PICTURE_TYPE_I;
 
     *got_picture_ptr = 1;
@@ -492,15 +491,14 @@ static av_cold int cllc_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-const AVCodec ff_cllc_decoder = {
-    .name           = "cllc",
-    .long_name      = NULL_IF_CONFIG_SMALL("Canopus Lossless Codec"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_CLLC,
+const FFCodec ff_cllc_decoder = {
+    .p.name         = "cllc",
+    CODEC_LONG_NAME("Canopus Lossless Codec"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_CLLC,
     .priv_data_size = sizeof(CLLCContext),
     .init           = cllc_decode_init,
-    .decode         = cllc_decode_frame,
+    FF_CODEC_DECODE_CB(cllc_decode_frame),
     .close          = cllc_decode_close,
-    .capabilities   = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
 };

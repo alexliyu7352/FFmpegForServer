@@ -22,9 +22,9 @@
 #include "libavutil/opt.h"
 
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "encode.h"
 #include "put_bits.h"
-#include "internal.h"
 #include "lpc.h"
 #include "mathops.h"
 #include "alac_data.h"
@@ -648,25 +648,21 @@ static const AVClass alacenc_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-FF_DISABLE_DEPRECATION_WARNINGS
-const AVCodec ff_alac_encoder = {
-    .name           = "alac",
-    .long_name      = NULL_IF_CONFIG_SMALL("ALAC (Apple Lossless Audio Codec)"),
-    .type           = AVMEDIA_TYPE_AUDIO,
-    .id             = AV_CODEC_ID_ALAC,
+const FFCodec ff_alac_encoder = {
+    .p.name         = "alac",
+    CODEC_LONG_NAME("ALAC (Apple Lossless Audio Codec)"),
+    .p.type         = AVMEDIA_TYPE_AUDIO,
+    .p.id           = AV_CODEC_ID_ALAC,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SMALL_LAST_FRAME |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(AlacEncodeContext),
-    .priv_class     = &alacenc_class,
+    .p.priv_class   = &alacenc_class,
     .init           = alac_encode_init,
-    .encode2        = alac_encode_frame,
+    FF_CODEC_ENCODE_CB(alac_encode_frame),
     .close          = alac_encode_close,
-    .capabilities   = AV_CODEC_CAP_SMALL_LAST_FRAME,
-#if FF_API_OLD_CHANNEL_LAYOUT
-    .channel_layouts = alac_channel_layouts,
-#endif
-    .ch_layouts     = ff_alac_ch_layouts,
-    .sample_fmts    = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S32P,
+    CODEC_OLD_CHANNEL_LAYOUTS_ARRAY(alac_channel_layouts)
+    .p.ch_layouts   = ff_alac_ch_layouts,
+    .p.sample_fmts  = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S32P,
                                                      AV_SAMPLE_FMT_S16P,
                                                      AV_SAMPLE_FMT_NONE },
-    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE,
 };
-FF_ENABLE_DEPRECATION_WARNINGS

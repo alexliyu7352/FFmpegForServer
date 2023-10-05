@@ -26,7 +26,7 @@
 #include "libavutil/pixfmt.h"
 
 #include "avcodec.h"
-#include "internal.h"
+#include "codec_internal.h"
 #include "vaapi_encode.h"
 
 #define VP9_MAX_QUANT 255
@@ -96,15 +96,15 @@ static int vaapi_encode_vp9_init_picture_params(AVCodecContext *avctx,
 
     switch (pic->type) {
     case PICTURE_TYPE_IDR:
-        av_assert0(pic->nb_refs == 0);
+        av_assert0(pic->nb_refs[0] == 0 && pic->nb_refs[1] == 0);
         vpic->ref_flags.bits.force_kf = 1;
         vpic->refresh_frame_flags = 0xff;
         hpic->slot = 0;
         break;
     case PICTURE_TYPE_P:
-        av_assert0(pic->nb_refs == 1);
+        av_assert0(!pic->nb_refs[1]);
         {
-            VAAPIEncodeVP9Picture *href = pic->refs[0]->priv_data;
+            VAAPIEncodeVP9Picture *href = pic->refs[0][0]->priv_data;
             av_assert0(href->slot == 0 || href->slot == 1);
 
             if (ctx->max_b_depth > 0) {
@@ -120,10 +120,10 @@ static int vaapi_encode_vp9_init_picture_params(AVCodecContext *avctx,
         }
         break;
     case PICTURE_TYPE_B:
-        av_assert0(pic->nb_refs == 2);
+        av_assert0(pic->nb_refs[0] && pic->nb_refs[1]);
         {
-            VAAPIEncodeVP9Picture *href0 = pic->refs[0]->priv_data,
-                                  *href1 = pic->refs[1]->priv_data;
+            VAAPIEncodeVP9Picture *href0 = pic->refs[0][0]->priv_data,
+                                  *href1 = pic->refs[1][0]->priv_data;
             av_assert0(href0->slot < pic->b_depth + 1 &&
                        href1->slot < pic->b_depth + 1);
 
@@ -157,12 +157,14 @@ static int vaapi_encode_vp9_init_picture_params(AVCodecContext *avctx,
     for (i = 0; i < FF_ARRAY_ELEMS(vpic->reference_frames); i++)
         vpic->reference_frames[i] = VA_INVALID_SURFACE;
 
-    for (i = 0; i < pic->nb_refs; i++) {
-        VAAPIEncodePicture *ref_pic = pic->refs[i];
-        int slot;
-        slot = ((VAAPIEncodeVP9Picture*)ref_pic->priv_data)->slot;
-        av_assert0(vpic->reference_frames[slot] == VA_INVALID_SURFACE);
-        vpic->reference_frames[slot] = ref_pic->recon_surface;
+    for (i = 0; i < MAX_REFERENCE_LIST_NUM; i++) {
+        for (int j = 0; j < pic->nb_refs[i]; j++) {
+            VAAPIEncodePicture *ref_pic = pic->refs[i][j];
+            int slot;
+            slot = ((VAAPIEncodeVP9Picture*)ref_pic->priv_data)->slot;
+            av_assert0(vpic->reference_frames[slot] == VA_INVALID_SURFACE);
+            vpic->reference_frames[slot] = ref_pic->recon_surface;
+        }
     }
 
     vpic->pic_flags.bits.frame_type = (pic->type != PICTURE_TYPE_IDR);
@@ -180,6 +182,17 @@ static int vaapi_encode_vp9_init_picture_params(AVCodecContext *avctx,
 
     vpic->filter_level    = priv->loop_filter_level;
     vpic->sharpness_level = priv->loop_filter_sharpness;
+
+    return 0;
+}
+
+static av_cold int vaapi_encode_vp9_get_encoder_caps(AVCodecContext *avctx)
+{
+    VAAPIEncodeContext *ctx = avctx->priv_data;
+
+    // Surfaces must be aligned to 64x64 superblock boundaries.
+    ctx->surface_width  = FFALIGN(avctx->width,  64);
+    ctx->surface_height = FFALIGN(avctx->height, 64);
 
     return 0;
 }
@@ -216,9 +229,11 @@ static av_cold int vaapi_encode_vp9_configure(AVCodecContext *avctx)
 }
 
 static const VAAPIEncodeProfile vaapi_encode_vp9_profiles[] = {
-    { FF_PROFILE_VP9_0,  8, 3, 1, 1, VAProfileVP9Profile0 },
-    { FF_PROFILE_VP9_2, 10, 3, 1, 1, VAProfileVP9Profile2 },
-    { FF_PROFILE_UNKNOWN }
+    { AV_PROFILE_VP9_0,  8, 3, 1, 1, VAProfileVP9Profile0 },
+    { AV_PROFILE_VP9_1,  8, 3, 0, 0, VAProfileVP9Profile1 },
+    { AV_PROFILE_VP9_2, 10, 3, 1, 1, VAProfileVP9Profile2 },
+    { AV_PROFILE_VP9_3, 10, 3, 0, 0, VAProfileVP9Profile3 },
+    { AV_PROFILE_UNKNOWN }
 };
 
 static const VAAPIEncodeType vaapi_encode_type_vp9 = {
@@ -231,6 +246,7 @@ static const VAAPIEncodeType vaapi_encode_type_vp9 = {
 
     .picture_priv_data_size = sizeof(VAAPIEncodeVP9Picture),
 
+    .get_encoder_caps      = &vaapi_encode_vp9_get_encoder_caps,
     .configure             = &vaapi_encode_vp9_configure,
 
     .sequence_params_size  = sizeof(VAEncSequenceParameterBufferVP9),
@@ -251,10 +267,6 @@ static av_cold int vaapi_encode_vp9_init(AVCodecContext *avctx)
     // can write its own headers and there is no metadata to include.
     ctx->desired_packed_headers = 0;
 
-    // Surfaces must be aligned to superblock boundaries.
-    ctx->surface_width  = FFALIGN(avctx->width,  64);
-    ctx->surface_height = FFALIGN(avctx->height, 64);
-
     return ff_vaapi_encode_init(avctx);
 }
 
@@ -271,7 +283,7 @@ static const AVOption vaapi_encode_vp9_options[] = {
     { NULL },
 };
 
-static const AVCodecDefault vaapi_encode_vp9_defaults[] = {
+static const FFCodecDefault vaapi_encode_vp9_defaults[] = {
     { "b",              "0"   },
     { "bf",             "0"   },
     { "g",              "250" },
@@ -287,24 +299,25 @@ static const AVClass vaapi_encode_vp9_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVCodec ff_vp9_vaapi_encoder = {
-    .name           = "vp9_vaapi",
-    .long_name      = NULL_IF_CONFIG_SMALL("VP9 (VAAPI)"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_VP9,
+const FFCodec ff_vp9_vaapi_encoder = {
+    .p.name         = "vp9_vaapi",
+    CODEC_LONG_NAME("VP9 (VAAPI)"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_VP9,
     .priv_data_size = sizeof(VAAPIEncodeVP9Context),
     .init           = &vaapi_encode_vp9_init,
-    .receive_packet = &ff_vaapi_encode_receive_packet,
+    FF_CODEC_RECEIVE_PACKET_CB(&ff_vaapi_encode_receive_packet),
     .close          = &ff_vaapi_encode_close,
-    .priv_class     = &vaapi_encode_vp9_class,
-    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_HARDWARE |
-                      AV_CODEC_CAP_DR1,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .p.priv_class   = &vaapi_encode_vp9_class,
+    .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_HARDWARE |
+                      AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_INIT_CLEANUP,
     .defaults       = vaapi_encode_vp9_defaults,
-    .pix_fmts = (const enum AVPixelFormat[]) {
+    .p.pix_fmts = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_VAAPI,
         AV_PIX_FMT_NONE,
     },
     .hw_configs     = ff_vaapi_encode_hw_configs,
-    .wrapper_name   = "vaapi",
+    .p.wrapper_name = "vaapi",
 };

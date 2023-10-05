@@ -33,24 +33,30 @@
 #include "internal.h"
 #include "video.h"
 
+const AVFilterPad ff_video_default_filterpad[1] = {
+    {
+        .name = "default",
+        .type = AVMEDIA_TYPE_VIDEO,
+    }
+};
+
 AVFrame *ff_null_get_video_buffer(AVFilterLink *link, int w, int h)
 {
     return ff_get_video_buffer(link->dst->outputs[0], w, h);
 }
 
-AVFrame *ff_default_get_video_buffer(AVFilterLink *link, int w, int h)
+AVFrame *ff_default_get_video_buffer2(AVFilterLink *link, int w, int h, int align)
 {
     AVFrame *frame = NULL;
     int pool_width = 0;
     int pool_height = 0;
     int pool_align = 0;
-    int align = av_cpu_max_align();
     enum AVPixelFormat pool_format = AV_PIX_FMT_NONE;
 
     if (link->hw_frames_ctx &&
         ((AVHWFramesContext*)link->hw_frames_ctx->data)->format == link->format) {
         int ret;
-        AVFrame *frame = av_frame_alloc();
+        frame = av_frame_alloc();
 
         if (!frame)
             return NULL;
@@ -94,11 +100,16 @@ AVFrame *ff_default_get_video_buffer(AVFilterLink *link, int w, int h)
     return frame;
 }
 
+AVFrame *ff_default_get_video_buffer(AVFilterLink *link, int w, int h)
+{
+    return ff_default_get_video_buffer2(link, w, h, av_cpu_max_align());
+}
+
 AVFrame *ff_get_video_buffer(AVFilterLink *link, int w, int h)
 {
     AVFrame *ret = NULL;
 
-    FF_TPRINTF_START(NULL, get_video_buffer); ff_tlog_link(NULL, link, 0);
+    FF_TPRINTF_START(NULL, get_video_buffer); ff_tlog_link(NULL, link, 1);
 
     if (link->dstpad->get_buffer.video)
         ret = link->dstpad->get_buffer.video(link, w, h);

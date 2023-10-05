@@ -28,8 +28,8 @@
 #include "libavutil/internal.h"
 #include "avcodec.h"
 #include "codec_id.h"
+#include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 
 typedef struct {
     int fq, q, s, lt;
@@ -39,7 +39,7 @@ typedef struct {
 // Licensed in the public domain
 
 // note, len denotes how many compressed bytes there are (uncompressed bytes / 8).
-static void au_compress(DFPWMState *state, int len, uint8_t *outbuf, uint8_t *inbuf)
+static void au_compress(DFPWMState *state, int len, uint8_t *outbuf, const uint8_t *inbuf)
 {
     unsigned d = 0;
     for (int i = 0; i < len; i++) {
@@ -107,15 +107,15 @@ static int dfpwm_enc_frame(struct AVCodecContext *ctx, struct AVPacket *packet,
     return 0;
 }
 
-const AVCodec ff_dfpwm_encoder = {
-    .name            = "dfpwm",
-    .long_name       = NULL_IF_CONFIG_SMALL("DFPWM1a audio"),
-    .type            = AVMEDIA_TYPE_AUDIO,
-    .id              = AV_CODEC_ID_DFPWM,
+const FFCodec ff_dfpwm_encoder = {
+    .p.name          = "dfpwm",
+    CODEC_LONG_NAME("DFPWM1a audio"),
+    .p.type          = AVMEDIA_TYPE_AUDIO,
+    .p.id            = AV_CODEC_ID_DFPWM,
     .priv_data_size  = sizeof(DFPWMState),
     .init            = dfpwm_enc_init,
-    .encode2         = dfpwm_enc_frame,
-    .sample_fmts     = (const enum AVSampleFormat[]){AV_SAMPLE_FMT_U8, AV_SAMPLE_FMT_NONE},
-    .capabilities    = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_VARIABLE_FRAME_SIZE,
-    .caps_internal   = FF_CODEC_CAP_INIT_THREADSAFE,
+    FF_CODEC_ENCODE_CB(dfpwm_enc_frame),
+    .p.sample_fmts   = (const enum AVSampleFormat[]){AV_SAMPLE_FMT_U8, AV_SAMPLE_FMT_NONE},
+    .p.capabilities  = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_VARIABLE_FRAME_SIZE |
+                       AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
 };
