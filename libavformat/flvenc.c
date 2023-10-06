@@ -65,6 +65,7 @@ static const AVCodecTag flv_audio_codec_ids[] = {
     { AV_CODEC_ID_NELLYMOSER, FLV_CODECID_NELLYMOSER >> FLV_AUDIO_CODECID_OFFSET },
     { AV_CODEC_ID_PCM_MULAW,  FLV_CODECID_PCM_MULAW  >> FLV_AUDIO_CODECID_OFFSET },
     { AV_CODEC_ID_PCM_ALAW,   FLV_CODECID_PCM_ALAW   >> FLV_AUDIO_CODECID_OFFSET },
+    { AV_CODEC_ID_OPUS,       FLV_CODECID_OPUS       >> FLV_AUDIO_CODECID_OFFSET },
     { AV_CODEC_ID_SPEEX,      FLV_CODECID_SPEEX      >> FLV_AUDIO_CODECID_OFFSET },
     { AV_CODEC_ID_NONE,       0 }
 };
@@ -134,6 +135,9 @@ static int get_audio_flags(AVFormatContext *s, AVCodecParameters *par)
     if (par->codec_id == AV_CODEC_ID_AAC) // specs force these parameters
         return FLV_CODECID_AAC | FLV_SAMPLERATE_44100HZ |
                FLV_SAMPLESSIZE_16BIT | FLV_STEREO;
+    else if (par->codec_id == AV_CODEC_ID_OPUS) // specs force these parameters
+        return FLV_CODECID_OPUS | FLV_SAMPLERATE_44100HZ |
+            FLV_SAMPLESSIZE_16BIT | FLV_STEREO;
     else if (par->codec_id == AV_CODEC_ID_SPEEX) {
         if (par->sample_rate != 16000) {
             av_log(s, AV_LOG_ERROR,
@@ -893,7 +897,7 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
         par->codec_id == AV_CODEC_ID_VP9) {
         if (pkt->pts == AV_NOPTS_VALUE) {
             av_log(s, AV_LOG_ERROR, "Packet is missing PTS\n");
-            return AVERROR(EINVAL);
+//            return AVERROR(EINVAL);
         }
     }
 

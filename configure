@@ -7976,7 +7976,7 @@ cat > $TMPH <<EOF
 #define CONFIG_THIS_YEAR 2023
 #define FFMPEG_DATADIR "$(eval c_escape $datadir)"
 #define AVCONV_DATADIR "$(eval c_escape $datadir)"
-#define CC_IDENT "$(c_escape ${cc_ident:-Unknown compiler})"
+#define CC_IDENT "$(c_escape ${cc_ident:-Unknown compiler})[made by liyu7352@gmail.com, https://github.com/alexliyu7352/FFmpegForServerBuild/]"
 #define OS_NAME $target_os
 #define av_restrict $restrict_keyword
 #define EXTERN_PREFIX "${extern_prefix}"

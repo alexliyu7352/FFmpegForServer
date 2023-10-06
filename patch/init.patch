@@ -1,0 +1,240 @@
+Subject: [PATCH] 变更
+---
+Index: libavformat/flvdec.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/libavformat/flvdec.c b/libavformat/flvdec.c
+--- a/libavformat/flvdec.c	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/libavformat/flvdec.c	(date 1696581479491)
+@@ -38,6 +38,7 @@
+ #include "demux.h"
+ #include "internal.h"
+ #include "flv.h"
++#include "hevc.h"
+ 
+ #define VALIDATE_INDEX_TS_THRESH 2500
+ 
+@@ -238,6 +239,11 @@
+     case FLV_CODECID_PCM_ALAW:
+         return apar->sample_rate == 8000 &&
+                apar->codec_id    == AV_CODEC_ID_PCM_ALAW;
++    case FLV_CODECID_OPUS:
++        return apar->sample_rate == 48000 &&
++               apar->channels == 2 &&
++               apar->bits_per_coded_sample == 16 &&
++               apar->codec_id == AV_CODEC_ID_OPUS ;
+     default:
+         return apar->codec_tag == (flv_codecid >> FLV_AUDIO_CODECID_OFFSET);
+     }
+@@ -295,6 +301,12 @@
+     case FLV_CODECID_PCM_ALAW:
+         apar->sample_rate = 8000;
+         apar->codec_id    = AV_CODEC_ID_PCM_ALAW;
++        break;
++    case FLV_CODECID_OPUS:
++        apar->sample_rate = 48000;
++        apar->channels = 2;
++        apar->bits_per_coded_sample = 16;
++        apar->codec_id = AV_CODEC_ID_OPUS;
+         break;
+     default:
+         avpriv_request_sample(s, "Audio codec (%x)",
+@@ -327,6 +339,8 @@
+         return vpar->codec_id == AV_CODEC_ID_VP6A;
+     case FLV_CODECID_H264:
+         return vpar->codec_id == AV_CODEC_ID_H264;
++    case FLV_CODECID_HEVC:
++        return vpar->codec_id == AV_CODEC_ID_HEVC;
+     default:
+         return vpar->codec_tag == flv_codecid;
+     }
+@@ -384,6 +398,10 @@
+     case FLV_CODECID_H264:
+         par->codec_id = AV_CODEC_ID_H264;
+         vstreami->need_parsing = AVSTREAM_PARSE_HEADERS;
++        break;
++    case FLV_CODECID_HEVC:
++        par->codec_id = AV_CODEC_ID_HEVC;
++        vstreami->need_parsing = AVSTREAM_PARSE_NONE;
+         break;
+     case FLV_CODECID_MPEG4:
+         par->codec_id = AV_CODEC_ID_MPEG4;
+Index: fftools/ffmpeg.h
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/fftools/ffmpeg.h b/fftools/ffmpeg.h
+--- a/fftools/ffmpeg.h	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/fftools/ffmpeg.h	(date 1696576484837)
+@@ -671,6 +671,7 @@
+ extern int copy_ts;
+ extern int start_at_zero;
+ extern int copy_tb;
++extern int fix_dts;
+ extern int debug_ts;
+ extern int exit_on_error;
+ extern int abort_on_flags;
+Index: libavformat/flvenc.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/libavformat/flvenc.c b/libavformat/flvenc.c
+--- a/libavformat/flvenc.c	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/libavformat/flvenc.c	(date 1696581814817)
+@@ -65,6 +65,7 @@
+     { AV_CODEC_ID_NELLYMOSER, FLV_CODECID_NELLYMOSER >> FLV_AUDIO_CODECID_OFFSET },
+     { AV_CODEC_ID_PCM_MULAW,  FLV_CODECID_PCM_MULAW  >> FLV_AUDIO_CODECID_OFFSET },
+     { AV_CODEC_ID_PCM_ALAW,   FLV_CODECID_PCM_ALAW   >> FLV_AUDIO_CODECID_OFFSET },
++    { AV_CODEC_ID_OPUS,       FLV_CODECID_OPUS       >> FLV_AUDIO_CODECID_OFFSET },
+     { AV_CODEC_ID_SPEEX,      FLV_CODECID_SPEEX      >> FLV_AUDIO_CODECID_OFFSET },
+     { AV_CODEC_ID_NONE,       0 }
+ };
+@@ -134,6 +135,9 @@
+     if (par->codec_id == AV_CODEC_ID_AAC) // specs force these parameters
+         return FLV_CODECID_AAC | FLV_SAMPLERATE_44100HZ |
+                FLV_SAMPLESSIZE_16BIT | FLV_STEREO;
++    else if (par->codec_id == AV_CODEC_ID_OPUS) // specs force these parameters
++        return FLV_CODECID_OPUS | FLV_SAMPLERATE_44100HZ |
++            FLV_SAMPLESSIZE_16BIT | FLV_STEREO;
+     else if (par->codec_id == AV_CODEC_ID_SPEEX) {
+         if (par->sample_rate != 16000) {
+             av_log(s, AV_LOG_ERROR,
+@@ -893,7 +897,7 @@
+         par->codec_id == AV_CODEC_ID_VP9) {
+         if (pkt->pts == AV_NOPTS_VALUE) {
+             av_log(s, AV_LOG_ERROR, "Packet is missing PTS\n");
+-            return AVERROR(EINVAL);
++//            return AVERROR(EINVAL);
+         }
+     }
+ 
+Index: configure
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/configure b/configure
+--- a/configure	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/configure	(date 1696574880068)
+@@ -7976,7 +7976,7 @@
+ #define CONFIG_THIS_YEAR 2023
+ #define FFMPEG_DATADIR "$(eval c_escape $datadir)"
+ #define AVCONV_DATADIR "$(eval c_escape $datadir)"
+-#define CC_IDENT "$(c_escape ${cc_ident:-Unknown compiler})"
++#define CC_IDENT "$(c_escape ${cc_ident:-Unknown compiler})[made by liyu7352@gmail.com, https://github.com/alexliyu7352/FFmpegForServerBuild/]"
+ #define OS_NAME $target_os
+ #define av_restrict $restrict_keyword
+ #define EXTERN_PREFIX "${extern_prefix}"
+Index: libavformat/flv.h
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/libavformat/flv.h b/libavformat/flv.h
+--- a/libavformat/flv.h	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/libavformat/flv.h	(date 1696581068849)
+@@ -105,6 +105,7 @@
+     FLV_CODECID_PCM_MULAW            = 8 << FLV_AUDIO_CODECID_OFFSET,
+     FLV_CODECID_AAC                  = 10<< FLV_AUDIO_CODECID_OFFSET,
+     FLV_CODECID_SPEEX                = 11<< FLV_AUDIO_CODECID_OFFSET,
++    FLV_CODECID_OPUS                 = 13 << FLV_AUDIO_CODECID_OFFSET,
+ };
+ 
+ enum {
+@@ -116,6 +117,7 @@
+     FLV_CODECID_H264    = 7,
+     FLV_CODECID_REALH263= 8,
+     FLV_CODECID_MPEG4   = 9,
++    FLV_CODECID_HEVC   = 12,
+ };
+ 
+ enum {
+Index: fftools/ffmpeg_opt.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/fftools/ffmpeg_opt.c b/fftools/ffmpeg_opt.c
+--- a/fftools/ffmpeg_opt.c	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/fftools/ffmpeg_opt.c	(date 1696576815922)
+@@ -76,6 +76,7 @@
+ int do_hex_dump       = 0;
+ int do_pkt_dump       = 0;
+ int copy_ts           = 0;
++int fix_dts           = 1;
+ int start_at_zero     = 0;
+ int copy_tb           = -1;
+ int debug_ts          = 0;
+@@ -1530,6 +1531,8 @@
+ #endif
+     { "copyts",         OPT_BOOL | OPT_EXPERT,                       { &copy_ts },
+         "copy timestamps" },
++    { "fix_dts",         OPT_BOOL | OPT_EXPERT,                       { &fix_dts },
++     "fix invalid dts" },
+     { "start_at_zero",  OPT_BOOL | OPT_EXPERT,                       { &start_at_zero },
+         "shift input timestamps to start at 0 when using copyts" },
+     { "copytb",         HAS_ARG | OPT_INT | OPT_EXPERT,              { &copy_tb },
+Index: libavformat/dashdec.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/libavformat/dashdec.c b/libavformat/dashdec.c
+--- a/libavformat/dashdec.c	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/libavformat/dashdec.c	(date 1696582645517)
+@@ -1393,7 +1393,8 @@
+         } else if (pls->fragment_duration){
+             av_log(s, AV_LOG_TRACE, "in fragment_duration mode fragment_timescale = %"PRId64", presentation_timeoffset = %"PRId64"\n", pls->fragment_timescale, pls->presentation_timeoffset);
+             if (pls->presentation_timeoffset) {
+-                num = pls->first_seq_no + (((get_current_time_in_sec() - c->availability_start_time) * pls->fragment_timescale)-pls->presentation_timeoffset) / pls->fragment_duration - c->min_buffer_time;
++//                num = pls->first_seq_no + (((get_current_time_in_sec() - c->availability_start_time) * pls->fragment_timescale)-pls->presentation_timeoffset) / pls->fragment_duration - c->min_buffer_time;
++                num = pls->first_seq_no + (((get_current_time_in_sec() - c->availability_start_time) - c->suggested_presentation_delay - c->period_start) * pls->fragment_timescale) / pls->fragment_duration;
+             } else if (c->publish_time > 0 && !c->availability_start_time) {
+                 if (c->min_buffer_time) {
+                     num = pls->first_seq_no + (((c->publish_time + pls->fragment_duration) - c->suggested_presentation_delay) * pls->fragment_timescale) / pls->fragment_duration - c->min_buffer_time;
+Index: fftools/ffmpeg_mux.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/fftools/ffmpeg_mux.c b/fftools/ffmpeg_mux.c
+--- a/fftools/ffmpeg_mux.c	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/fftools/ffmpeg_mux.c	(date 1696576815858)
+@@ -95,7 +95,7 @@
+         av_packet_rescale_ts(pkt, pkt->time_base, ost->st->time_base);
+     pkt->time_base = ost->st->time_base;
+ 
+-    if (!(s->oformat->flags & AVFMT_NOTIMESTAMPS)) {
++    if (fix_dts &&!(s->oformat->flags & AVFMT_NOTIMESTAMPS)) {
+         if (pkt->dts != AV_NOPTS_VALUE &&
+             pkt->pts != AV_NOPTS_VALUE &&
+             pkt->dts > pkt->pts) {
+Index: libavformat/mux.c
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/libavformat/mux.c b/libavformat/mux.c
+--- a/libavformat/mux.c	(revision ecbc5e7613ab210ce04953d792314fb4308fd363)
++++ b/libavformat/mux.c	(date 1696575683244)
+@@ -551,14 +551,14 @@
+         av_log(s, AV_LOG_ERROR,
+                "Application provided invalid, non monotonically increasing dts to muxer in stream %d: %s >= %s\n",
+                st->index, av_ts2str(sti->cur_dts), av_ts2str(pkt->dts));
+-        return AVERROR(EINVAL);
++//        return AVERROR(EINVAL);
+     }
+     if (pkt->dts != AV_NOPTS_VALUE && pkt->pts != AV_NOPTS_VALUE && pkt->pts < pkt->dts) {
+         av_log(s, AV_LOG_ERROR,
+                "pts (%s) < dts (%s) in stream %d\n",
+                av_ts2str(pkt->pts), av_ts2str(pkt->dts),
+                st->index);
+-        return AVERROR(EINVAL);
++//        return AVERROR(EINVAL);
+     }
+ 
+     if (s->debug & FF_FDEBUG_TS)

@@ -95,7 +95,7 @@ static int write_packet(Muxer *mux, OutputStream *ost, AVPacket *pkt)
         av_packet_rescale_ts(pkt, pkt->time_base, ost->st->time_base);
     pkt->time_base = ost->st->time_base;
 
-    if (!(s->oformat->flags & AVFMT_NOTIMESTAMPS)) {
+    if (fix_dts &&!(s->oformat->flags & AVFMT_NOTIMESTAMPS)) {
         if (pkt->dts != AV_NOPTS_VALUE &&
             pkt->pts != AV_NOPTS_VALUE &&
             pkt->dts > pkt->pts) {

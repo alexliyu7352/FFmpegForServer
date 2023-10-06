@@ -551,14 +551,14 @@ static int compute_muxer_pkt_fields(AVFormatContext *s, AVStream *st, AVPacket *
         av_log(s, AV_LOG_ERROR,
                "Application provided invalid, non monotonically increasing dts to muxer in stream %d: %s >= %s\n",
                st->index, av_ts2str(sti->cur_dts), av_ts2str(pkt->dts));
-        return AVERROR(EINVAL);
+//        return AVERROR(EINVAL);
     }
     if (pkt->dts != AV_NOPTS_VALUE && pkt->pts != AV_NOPTS_VALUE && pkt->pts < pkt->dts) {
         av_log(s, AV_LOG_ERROR,
                "pts (%s) < dts (%s) in stream %d\n",
                av_ts2str(pkt->pts), av_ts2str(pkt->dts),
                st->index);
-        return AVERROR(EINVAL);
+//        return AVERROR(EINVAL);
     }
 
     if (s->debug & FF_FDEBUG_TS)
