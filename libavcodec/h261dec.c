@@ -94,7 +94,6 @@ static av_cold int h261_decode_init(AVCodecContext *avctx)
     avctx->pix_fmt = AV_PIX_FMT_YUV420P;
 
     h->gob_start_code_skipped = 0;
-    ff_mpv_idct_init(s);
 
     ff_thread_once(&init_static_once, h261_decode_init_static);
 
@@ -640,13 +639,6 @@ retry:
 
         goto retry;
     }
-
-    // for skipping the frame
-    s->current_picture.f->pict_type = s->pict_type;
-    if (s->pict_type == AV_PICTURE_TYPE_I)
-        s->current_picture.f->flags |= AV_FRAME_FLAG_KEY;
-    else
-        s->current_picture.f->flags &= ~AV_FRAME_FLAG_KEY;
 
     if ((avctx->skip_frame >= AVDISCARD_NONREF && s->pict_type == AV_PICTURE_TYPE_B) ||
         (avctx->skip_frame >= AVDISCARD_NONKEY && s->pict_type != AV_PICTURE_TYPE_I) ||

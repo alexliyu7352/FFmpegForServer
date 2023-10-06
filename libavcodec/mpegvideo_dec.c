@@ -54,6 +54,7 @@ void ff_mpv_decode_init(MpegEncContext *s, AVCodecContext *avctx)
     /* convert fourcc to upper case */
     s->codec_tag       = ff_toupper4(avctx->codec_tag);
 
+    ff_mpv_idct_init(s);
     ff_h264chroma_init(&s->h264chroma, 8); //for lowres
 }
 
@@ -76,20 +77,16 @@ int ff_mpeg_update_thread_context(AVCodecContext *dst,
         int err;
         memcpy(s, s1, sizeof(*s));
 
+        s->context_initialized   = 0;
+        s->context_reinit        = 0;
         s->avctx                 = dst;
         s->private_ctx           = private_ctx;
         s->bitstream_buffer      = NULL;
         s->bitstream_buffer_size = s->allocated_bitstream_buffer_size = 0;
 
         if (s1->context_initialized) {
-            ff_mpv_idct_init(s);
-            if ((err = ff_mpv_common_init(s)) < 0) {
-                memset(s, 0, sizeof(*s));
-                s->avctx = dst;
-                s->private_ctx = private_ctx;
-                memcpy(&s->h264chroma, &s1->h264chroma, sizeof(s->h264chroma));
+            if ((err = ff_mpv_common_init(s)) < 0)
                 return err;
-            }
         }
     }
 

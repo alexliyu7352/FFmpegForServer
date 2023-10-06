@@ -431,7 +431,6 @@ av_cold int ff_vc1_decode_init(AVCodecContext *avctx)
         return ret;
 
     ff_mpv_decode_init(s, avctx);
-    ff_mpv_idct_init(s);
 
     avctx->pix_fmt = vc1_get_format(avctx);
 
@@ -1058,13 +1057,6 @@ static int vc1_decode_frame(AVCodecContext *avctx, AVFrame *pict,
         ret = AVERROR_INVALIDDATA;
         goto err;
     }
-
-    // for skipping the frame
-    s->current_picture.f->pict_type = s->pict_type;
-    if (s->pict_type == AV_PICTURE_TYPE_I)
-        s->current_picture.f->flags |= AV_FRAME_FLAG_KEY;
-    else
-        s->current_picture.f->flags &= ~AV_FRAME_FLAG_KEY;
 
     /* skip B-frames if we don't have reference frames */
     if (!s->last_picture_ptr && s->pict_type == AV_PICTURE_TYPE_B) {

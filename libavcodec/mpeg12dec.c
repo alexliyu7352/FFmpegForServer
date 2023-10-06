@@ -1057,9 +1057,6 @@ static av_cold int mpeg_decode_init(AVCodecContext *avctx)
         avctx->coded_width = avctx->coded_height = 0; // do not trust dimensions from input
     ff_mpv_decode_init(s2, avctx);
 
-    /* we need some permutation to store matrices,
-     * until the decoder sets the real permutation. */
-    ff_mpv_idct_init(s2);
     ff_mpeg12_init_vlcs();
 
     s2->chroma_format              = 1;
@@ -1092,18 +1089,6 @@ static int mpeg_decode_update_thread_context(AVCodecContext *avctx,
     return 0;
 }
 #endif
-
-static void quant_matrix_rebuild(uint16_t *matrix, const uint8_t *old_perm,
-                                 const uint8_t *new_perm)
-{
-    uint16_t temp_matrix[64];
-    int i;
-
-    memcpy(temp_matrix, matrix, 64 * sizeof(uint16_t));
-
-    for (i = 0; i < 64; i++)
-        matrix[new_perm[i]] = temp_matrix[old_perm[i]];
-}
 
 static const enum AVPixelFormat mpeg1_hwaccel_pixfmt_list_420[] = {
 #if CONFIG_MPEG1_NVDEC_HWACCEL
@@ -1177,7 +1162,6 @@ static int mpeg_decode_postinit(AVCodecContext *avctx)
 {
     Mpeg1Context *s1  = avctx->priv_data;
     MpegEncContext *s = &s1->mpeg_enc_ctx;
-    uint8_t old_permutation[64];
     int ret;
 
     if (avctx->codec_id == AV_CODEC_ID_MPEG1VIDEO) {
@@ -1297,18 +1281,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         avctx->pix_fmt = mpeg_get_pixelformat(avctx);
 
-        /* Quantization matrices may need reordering
-         * if DCT permutation is changed. */
-        memcpy(old_permutation, s->idsp.idct_permutation, 64 * sizeof(uint8_t));
-
-        ff_mpv_idct_init(s);
         if ((ret = ff_mpv_common_init(s)) < 0)
             return ret;
-
-        quant_matrix_rebuild(s->intra_matrix,        old_permutation, s->idsp.idct_permutation);
-        quant_matrix_rebuild(s->inter_matrix,        old_permutation, s->idsp.idct_permutation);
-        quant_matrix_rebuild(s->chroma_intra_matrix, old_permutation, s->idsp.idct_permutation);
-        quant_matrix_rebuild(s->chroma_inter_matrix, old_permutation, s->idsp.idct_permutation);
 
         s1->mpeg_enc_ctx_allocated = 1;
     }
@@ -1352,11 +1326,6 @@ static int mpeg1_decode_picture(AVCodecContext *avctx, const uint8_t *buf,
         s->mpeg_f_code[1][0] = f_code;
         s->mpeg_f_code[1][1] = f_code;
     }
-    s->current_picture.f->pict_type = s->pict_type;
-    if (s->pict_type == AV_PICTURE_TYPE_I)
-        s->current_picture.f->flags |= AV_FRAME_FLAG_KEY;
-    else
-        s->current_picture.f->flags &= ~AV_FRAME_FLAG_KEY;
 
     if (avctx->debug & FF_DEBUG_PICT_INFO)
         av_log(avctx, AV_LOG_DEBUG,
@@ -1530,11 +1499,6 @@ static int mpeg_decode_picture_coding_extension(Mpeg1Context *s1)
                 s->pict_type = AV_PICTURE_TYPE_P;
         } else
             s->pict_type = AV_PICTURE_TYPE_B;
-        s->current_picture.f->pict_type = s->pict_type;
-        if (s->pict_type == AV_PICTURE_TYPE_I)
-            s->current_picture.f->flags |= AV_FRAME_FLAG_KEY;
-        else
-            s->current_picture.f->flags &= ~AV_FRAME_FLAG_KEY;
     }
 
     s->intra_dc_precision         = get_bits(&s->gb, 2);
@@ -2169,7 +2133,6 @@ static int vcr2_init_sequence(AVCodecContext *avctx)
 
     avctx->pix_fmt = mpeg_get_pixelformat(avctx);
 
-    ff_mpv_idct_init(s);
     if ((ret = ff_mpv_common_init(s)) < 0)
         return ret;
     s1->mpeg_enc_ctx_allocated = 1;
@@ -3074,7 +3037,6 @@ static av_cold int ipu_decode_init(AVCodecContext *avctx)
     avctx->pix_fmt = AV_PIX_FMT_YUV420P;
 
     ff_mpv_decode_init(m, avctx);
-    ff_mpv_idct_init(m);
     ff_mpeg12_init_vlcs();
 
     for (int i = 0; i < 64; i++) {
